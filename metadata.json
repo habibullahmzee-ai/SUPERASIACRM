@@ -1,0 +1,8 @@
+{
+  "description": "Super Asia Enterprise CRM - High-performance service management system with Excel integration, multi-role access control, and technician workflow tracking.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "name": "Super Asia Enterprise Core"
+}
