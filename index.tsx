@@ -10,7 +10,7 @@ import {
   Check, ShieldAlert, ArrowRight, Camera, Save, ClipboardList, AlertCircle, DollarSign, PenTool,
   TrendingDown, Layers, Activity, Search, Filter, Calendar, ChevronUp, Menu, CheckSquare as CheckSquareIcon,
   Square, UserCheck, UserMinus, Key, MoreHorizontal, UserX, FileType, ToggleLeft, ToggleRight,
-  Terminal, Code2, AlertTriangle
+  Terminal, Code2, AlertTriangle, FilePlus
 } from 'lucide-react';
 import { PRODUCT_MODEL_DB } from './product_db';
 import { INITIAL_TECHNICIANS } from './technician_db';
@@ -18,9 +18,31 @@ import { INITIAL_TECHNICIANS } from './technician_db';
 const ALL_MODELS = Object.keys(PRODUCT_MODEL_DB).sort();
 const ALL_PRODUCT_CATEGORIES = Array.from(new Set(Object.values(PRODUCT_MODEL_DB))).sort();
 
+// --- Location Data ---
+const PAKISTAN_LOCATIONS: Record<string, Record<string, string[]>> = {
+  "SINDH": {
+    "KARACHI": ["Clifton", "DHA", "Gulshan-e-Iqbal", "North Nazimabad", "Malir", "Korangi", "Federal B Area", "Saddar", "Lyari", "Surjani Town"],
+    "HYDERABAD": ["Latifabad", "Qasimabad", "City Area"],
+    "SUKKUR": ["Barrage Road", "Old Sukkur", "New Sukkur"]
+  },
+  "PUNJAB": {
+    "LAHORE": ["DHA", "Gulberg", "Model Town", "Johar Town", "Bahria Town", "Walled City", "Iqbal Town", "Cantt"],
+    "FAISALABAD": ["Madina Town", "People's Colony", "Samanabad"],
+    "MULTAN": ["Gulgasht Colony", "Multan Cantt", "Shah Rukne Alam"],
+    "RAWALPINDI": ["Satellite Town", "Saddar", "Bahria Town"]
+  },
+  "ISLAMABAD": {
+    "ISLAMABAD": ["F-6", "F-7", "F-8", "G-9", "G-10", "G-11", "I-8", "I-9", "Blue Area", "DHA"]
+  },
+  "KPK": {
+    "PESHAWAR": ["Hayatabad", "University Town", "Peshawar Cantt"],
+    "ABBOTTABAD": ["Mandian", "Supply", "Cantt"]
+  }
+};
+
 // --- Types ---
 type AppState = 'portal' | 'admin-dash' | 'technician-dash';
-type AdminTab = 'dashboard' | 'field-staff' | 'reports';
+type AdminTab = 'dashboard' | 'reports' | 'launch';
 
 interface HistoryLog {
   date: string;
@@ -260,6 +282,178 @@ const StatusBadge = ({ status }: { status: string }) => {
   );
 };
 
+// --- View: Launch Case Tab (Admin) ---
+const LaunchCaseTab = ({ onCaseLaunched }: { onCaseLaunched: (newCase: Complaint) => void }) => {
+  const [formData, setFormData] = useState({
+    customerName: "",
+    phoneNo: "",
+    state: "",
+    city: "",
+    area: "",
+    detailedAddress: "",
+    product: "",
+    model: "",
+    dop: "",
+    problemDescription: ""
+  });
+
+  const [loading, setLoading] = useState(false);
+
+  const availableCities = useMemo(() => {
+    if (!formData.state) return [];
+    return Object.keys(PAKISTAN_LOCATIONS[formData.state] || {});
+  }, [formData.state]);
+
+  const availableAreas = useMemo(() => {
+    if (!formData.state || !formData.city) return [];
+    return PAKISTAN_LOCATIONS[formData.state][formData.city] || [];
+  }, [formData.state, formData.city]);
+
+  const filteredModels = useMemo(() => {
+    if (!formData.product) return ALL_MODELS;
+    return ALL_MODELS.filter(m => PRODUCT_MODEL_DB[m] === formData.product);
+  }, [formData.product]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.customerName || !formData.phoneNo || !formData.product || !formData.model) {
+      alert("Please fill mandatory fields (Name, Contact, Product, Model)");
+      return;
+    }
+
+    setLoading(true);
+    const complaints = SuperAsiaDB.getComplaints();
+    
+    // Auto-generate complaint number
+    const lastNo = complaints.reduce((max, c) => {
+      const num = parseInt(c.complaintNo);
+      return isNaN(num) ? max : Math.max(max, num);
+    }, 10000);
+    const newComplaintNo = String(lastNo + 1);
+
+    const fullAddress = `${formData.detailedAddress}, ${formData.area}, ${formData.city}, ${formData.state}`;
+    const today = getPKDate();
+
+    const newCase: Complaint = {
+      id: `SA-${Date.now()}`,
+      complaintNo: newComplaintNo,
+      customerName: formData.customerName.toUpperCase(),
+      phoneNo: formData.phoneNo,
+      address: fullAddress.toUpperCase(),
+      product: formData.product,
+      model: formData.model,
+      problemDescription: formData.problemDescription,
+      dop: formData.dop,
+      regDate: today,
+      status: "PENDING",
+      priority: "NORMAL",
+      technician: "UNASSIGNED",
+      updateDate: "",
+      remarks: "",
+      aging: 0,
+      category: formData.product,
+      history: [],
+      images: [],
+      visitCharges: 0,
+      partsCharges: 0,
+      otherCharges: 0
+    };
+
+    const updated = [newCase, ...complaints];
+    SuperAsiaDB.saveComplaints(updated);
+    
+    // Print PDF immediately
+    printComplaintReport(newCase);
+    
+    onCaseLaunched(newCase);
+    setLoading(false);
+    
+    // Reset Form
+    setFormData({
+      customerName: "",
+      phoneNo: "",
+      state: "",
+      city: "",
+      area: "",
+      detailedAddress: "",
+      product: "",
+      model: "",
+      dop: "",
+      problemDescription: ""
+    });
+    alert(`Complaint Launched Successfully! No: ${newComplaintNo}`);
+  };
+
+  return (
+    <div className="p-10 bg-slate-50 flex-1 overflow-auto custom-scrollbar">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
+           <div className="flex items-center gap-6 mb-8">
+              <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                 <FilePlus size={28} />
+              </div>
+              <div>
+                 <h2 className="text-xl font-black uppercase tracking-tighter text-slate-900">Launch New Complaint</h2>
+                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Personnel Authorization: BALAJ ANSARI</p>
+              </div>
+           </div>
+
+           <form onSubmit={handleSubmit} className="space-y-10">
+              {/* Customer Section */}
+              <div className="space-y-6">
+                 <h3 className="text-[11px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2">
+                    <User size={14}/> Customer Persona
+                 </h3>
+                 <div className="grid grid-cols-2 gap-6">
+                    <Input label="Customer Full Name" value={formData.customerName} onChange={(v:any) => setFormData({...formData, customerName: v})} placeholder="Enter Customer Name..." />
+                    <Input label="Contact Number" value={formData.phoneNo} onChange={(v:any) => setFormData({...formData, phoneNo: v})} placeholder="03xx-xxxxxxx" />
+                 </div>
+              </div>
+
+              {/* Location Section */}
+              <div className="space-y-6">
+                 <h3 className="text-[11px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2">
+                    <MapPin size={14}/> Geographical Matrix
+                 </h3>
+                 <div className="grid grid-cols-3 gap-6">
+                    <Select label="State / Province" value={formData.state} options={Object.keys(PAKISTAN_LOCATIONS)} onChange={(v:any) => setFormData({...formData, state: v, city: "", area: ""})} />
+                    <Select label="City" value={formData.city} options={availableCities} onChange={(v:any) => setFormData({...formData, city: v, area: ""})} />
+                    <Select label="Area" value={formData.area} options={availableAreas} onChange={(v:any) => setFormData({...formData, area: v})} />
+                 </div>
+                 <Input label="Detailed Street Address" value={formData.detailedAddress} onChange={(v:any) => setFormData({...formData, detailedAddress: v})} placeholder="House No, Street, Landmark..." />
+              </div>
+
+              {/* Product Section */}
+              <div className="space-y-6">
+                 <h3 className="text-[11px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2">
+                    <Package size={14}/> Asset Intelligence
+                 </h3>
+                 <div className="grid grid-cols-2 gap-6">
+                    <Select label="Product Category" value={formData.product} options={ALL_PRODUCT_CATEGORIES} onChange={(v:any) => setFormData({...formData, product: v, model: ""})} />
+                    <Select label="Model Number" value={formData.model} options={filteredModels} onChange={(v:any) => setFormData({...formData, model: v})} />
+                 </div>
+                 <div className="grid grid-cols-2 gap-6">
+                    <Input label="Date of Purchase (D.O.P)" type="date" value={formData.dop} onChange={(v:any) => setFormData({...formData, dop: v})} />
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Fault Description</label>
+                       <textarea className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 px-6 text-[13px] font-black transition-all outline-none focus:border-blue-600 h-28 resize-none" value={formData.problemDescription} onChange={(e) => setFormData({...formData, problemDescription: e.target.value})} placeholder="Describe technical issue..." />
+                    </div>
+                 </div>
+              </div>
+
+              <div className="pt-8">
+                 <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-6 rounded-[2.5rem] font-black uppercase text-[15px] tracking-widest shadow-2xl shadow-blue-600/30 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-3">
+                    {loading ? <RefreshCw className="animate-spin" /> : <Save size={20}/>}
+                    Establish Case & Generate Report
+                 </button>
+              </div>
+           </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- View: Remarks Update Interface (Technician) ---
 const TechnicianDash = ({ staff, onLogout }: { staff: Staff, onLogout: () => void }) => {
   const [jobs, setJobs] = useState<Complaint[]>([]);
@@ -472,10 +666,8 @@ const ReportsTab = ({ complaints, staffList }: { complaints: Complaint[], staffL
     const parts = selectedDate.split('-');
     const targetDateStr = `${parts[2]}.${parts[1]}.${parts[0].slice(-2)}`;
     
-    // Group all complaints by technician for the selected date
     const techGroups: Record<string, Complaint[]> = {};
     
-    // Only target TECHNICIANS
     staffList.filter(s => s.position === 'TECHNICIAN' && s.status === 'ACTIVE').forEach(tech => {
        const jobsForTech = complaints.filter(c => {
          const assigned = (c.technician || '').split(', ').map(n => n.trim().toUpperCase());
@@ -494,7 +686,6 @@ const ReportsTab = ({ complaints, staffList }: { complaints: Complaint[], staffL
 
   return (
     <div className="p-8 flex-1 overflow-auto bg-[#F8FAFC] space-y-8 custom-scrollbar">
-      {/* Header Panel matching screenshot style */}
       <div className="bg-white p-8 rounded-[2.5rem] shadow-sm flex items-center justify-between border border-slate-100">
          <div className="flex items-center gap-6">
             <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
@@ -516,7 +707,6 @@ const ReportsTab = ({ complaints, staffList }: { complaints: Complaint[], staffL
          </div>
       </div>
 
-      {/* Technician Nodes matching screenshot style */}
       <div className="space-y-10">
          {techActivity.map((group, idx) => (
             <div key={idx} className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
@@ -686,14 +876,69 @@ const AdminDash = ({ staff, onLogout }: { staff: Staff, onLogout: () => void }) 
         <div className="p-6 border-b border-slate-800"><SuperAsiaBranding size="sm" /></div>
         <nav className="flex-1 py-8">
            <SidebarItem icon={Database} label="Service DB" active={currentTab === 'dashboard'} onClick={() => setCurrentTab('dashboard')} collapsed={!isSidebarOpen} />
+           <SidebarItem icon={FilePlus} label="Launch Case" active={currentTab === 'launch'} onClick={() => setCurrentTab('launch')} collapsed={!isSidebarOpen} />
            <SidebarItem icon={BarChart2} label="Reports Node" active={currentTab === 'reports'} onClick={() => setCurrentTab('reports')} collapsed={!isSidebarOpen} />
         </nav>
         <button onClick={onLogout} className="p-6 border-t border-slate-800 text-rose-500 font-black uppercase text-[10px] flex gap-4"><LogOut size={20}/> {isSidebarOpen && 'Logout'}</button>
       </aside>
       <main className="flex-1 flex flex-col min-w-0 bg-white relative">
-        <header className="h-20 border-b border-slate-100 flex items-center justify-between px-8 shrink-0 bg-white z-40"><div className="flex items-center gap-4"><button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-slate-50 rounded-lg"><Menu size={24}/></button><h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-slate-400">Enterprise Core System</h2></div>{currentTab === 'dashboard' && (<div className="flex gap-4"><button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl shadow-blue-600/20 active:scale-95 transition-all"><Upload size={16}/> Master Sync</button><input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" /></div>)}</header>
+        <header className="h-20 border-b border-slate-100 flex items-center justify-between px-8 shrink-0 bg-white z-40">
+           <div className="flex items-center gap-4">
+              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-slate-50 rounded-lg"><Menu size={24}/></button>
+              <h2 className="text-[12px] font-black uppercase tracking-[0.2em] text-slate-400">Enterprise Core System</h2>
+           </div>
+           {currentTab === 'dashboard' && (
+              <div className="flex gap-4">
+                 <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl shadow-blue-600/20 active:scale-95 transition-all"><Upload size={16}/> Master Sync</button>
+                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+              </div>
+           )}
+        </header>
+
         <div className="flex-1 overflow-hidden flex flex-col bg-white">
-           {currentTab === 'dashboard' ? (<div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left border-collapse table-fixed" style={{ width: Object.values(columnWidths).reduce((a, b) => a + b, 0) }}><thead className="sticky top-0 bg-[#0F172A] text-white z-30 text-[10px] font-black uppercase"><tr>{Object.entries(columnWidths).map(([key, width]) => (<th key={key} className="px-5 py-5 border-r border-slate-800" style={{ width }}>{key}</th>))}</tr></thead><tbody className="divide-y divide-slate-100 text-[11px] font-bold">{complaints.map(row => (<tr key={row.id} className="hover:bg-blue-50/50 transition-all group"><td className="px-5 py-4 flex gap-1.5 bg-white group-hover:bg-blue-50 sticky left-0 shadow-[10px_0_15px_-10px_rgba(0,0,0,0.1)] z-10"><button onClick={() => { setSelectedAction(row); setActiveModal('view'); }} className="p-2 bg-slate-900 text-white rounded-xl hover:bg-black transition-all" title="View Detail"><Eye size={14}/></button><button onClick={() => { setSelectedAction(row); setActiveModal('assign'); }} className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all" title="Assign"><UserPlus size={14}/></button><button onClick={() => printComplaintReport(row)} className="p-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all" title="PDF"><FileDown size={14}/></button></td><td className="px-5 py-4"><StatusBadge status={row.status} /></td><td className="px-5 py-4 text-rose-600 uppercase font-black">{row.priority || 'NORMAL'}</td><td className="px-5 py-4 text-blue-800 uppercase truncate">{row.technician || '---'}</td><td className="px-5 py-4 text-center"><span className="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-black">{row.aging}d</span></td><td className="px-5 py-4">{row.regDate}</td><td className="px-5 py-4 text-rose-500 font-black italic">{row.updateDate || '---'}</td><td className="px-5 py-4 text-slate-900 tracking-tighter">{row.complaintNo}</td><td className="px-5 py-4 truncate uppercase text-slate-900">{row.customerName}</td><td className="px-5 py-4">{row.phoneNo}</td><td className="px-5 py-4 text-slate-500 truncate uppercase">{row.product}</td><td className="px-5 py-4 text-slate-500 truncate uppercase">{row.model}</td><td className="px-5 py-4 text-slate-900 truncate font-black" title={row.problemDescription}>{row.problemDescription || '---'}</td><td className="px-5 py-4 text-emerald-700">PKR {row.visitCharges || 0}</td><td className="px-5 py-4 text-rose-700">PKR {row.partsCharges || 0}</td><td className="px-5 py-4 text-slate-700">PKR {row.otherCharges || 0}</td><td className="px-5 py-4 text-blue-700 italic truncate" title={row.remarks}>{row.remarks || '---'}</td></tr>))}</tbody></table></div>) : (<ReportsTab complaints={complaints} staffList={staffList} />)}
+           {currentTab === 'dashboard' ? (
+              <div className="flex-1 overflow-auto custom-scrollbar">
+                 <table className="w-full text-left border-collapse table-fixed" style={{ width: Object.values(columnWidths).reduce((a, b) => a + b, 0) }}>
+                    <thead className="sticky top-0 bg-[#0F172A] text-white z-30 text-[10px] font-black uppercase">
+                       <tr>{Object.entries(columnWidths).map(([key, width]) => (<th key={key} className="px-5 py-5 border-r border-slate-800" style={{ width }}>{key}</th>))}</tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[11px] font-bold">
+                       {complaints.map(row => (
+                          <tr key={row.id} className="hover:bg-blue-50/50 transition-all group">
+                             <td className="px-5 py-4 flex gap-1.5 bg-white group-hover:bg-blue-50 sticky left-0 shadow-[10px_0_15px_-10px_rgba(0,0,0,0.1)] z-10">
+                                <button onClick={() => { setSelectedAction(row); setActiveModal('view'); }} className="p-2 bg-slate-900 text-white rounded-xl hover:bg-black transition-all" title="View Detail"><Eye size={14}/></button>
+                                <button onClick={() => { setSelectedAction(row); setActiveModal('assign'); }} className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all" title="Assign"><UserPlus size={14}/></button>
+                                <button onClick={() => printComplaintReport(row)} className="p-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all" title="PDF"><FileDown size={14}/></button>
+                             </td>
+                             <td className="px-5 py-4"><StatusBadge status={row.status} /></td>
+                             <td className="px-5 py-4 text-rose-600 uppercase font-black">{row.priority || 'NORMAL'}</td>
+                             <td className="px-5 py-4 text-blue-800 uppercase truncate">{row.technician || '---'}</td>
+                             <td className="px-5 py-4 text-center"><span className="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-black">{row.aging}d</span></td>
+                             <td className="px-5 py-4">{row.regDate}</td>
+                             <td className="px-5 py-4 text-rose-500 font-black italic">{row.updateDate || '---'}</td>
+                             <td className="px-5 py-4 text-slate-900 tracking-tighter">{row.complaintNo}</td>
+                             <td className="px-5 py-4 truncate uppercase text-slate-900">{row.customerName}</td>
+                             <td className="px-5 py-4">{row.phoneNo}</td>
+                             <td className="px-5 py-4 text-slate-500 truncate uppercase">{row.product}</td>
+                             <td className="px-5 py-4 text-slate-500 truncate uppercase">{row.model}</td>
+                             <td className="px-5 py-4 text-slate-900 truncate font-black" title={row.problemDescription}>{row.problemDescription || '---'}</td>
+                             <td className="px-5 py-4 text-emerald-700">PKR {row.visitCharges || 0}</td>
+                             <td className="px-5 py-4 text-rose-700">PKR {row.partsCharges || 0}</td>
+                             <td className="px-5 py-4 text-slate-700">PKR {row.otherCharges || 0}</td>
+                             <td className="px-5 py-4 text-blue-700 italic truncate" title={row.remarks}>{row.remarks || '---'}</td>
+                          </tr>
+                       ))}
+                    </tbody>
+                 </table>
+              </div>
+           ) : currentTab === 'reports' ? (
+              <ReportsTab complaints={complaints} staffList={staffList} />
+           ) : (
+              <LaunchCaseTab onCaseLaunched={(c) => { 
+                setComplaints(SuperAsiaDB.getComplaints().map(x => ({...x, aging: calculateAging(x.regDate)}))); 
+                setCurrentTab('dashboard'); 
+              }} />
+           )}
         </div>
       </main>
       {selectedAction && activeModal === 'view' && <ViewModal selectedAction={selectedAction} onClose={() => setActiveModal(null)} onUpdateCase={handleUpdateCase} />}
