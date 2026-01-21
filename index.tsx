@@ -11,31 +11,74 @@ import {
   TrendingDown, Layers, Activity, Search, Filter, Calendar, ChevronUp, Menu, CheckSquare as CheckSquareIcon,
   Square, UserCheck, UserMinus, Key, MoreHorizontal, UserX, FileType, ToggleLeft, ToggleRight,
   Terminal, Code2, AlertTriangle, FilePlus, Download, FilterX, Clipboard, Printer, FileText as PdfIcon,
-  Briefcase, UserRound, LayoutDashboard, ListChecks, Wrench, ShieldEllipsis, TableProperties, MonitorCheck
+  Briefcase, UserRound, LayoutDashboard, ListChecks, Wrench, ShieldEllipsis, TableProperties, MonitorCheck,
+  CreditCard, Gauge, Landmark, UserCog, Power
 } from 'lucide-react';
 import { PRODUCT_MODEL_DB } from './product_db';
 import { INITIAL_TECHNICIANS } from './technician_db';
 
-// --- Constants & DB Mapping ---
-const getProduct = (model: string) => {
-  const m = String(model || "").toUpperCase().trim();
-  if (m.includes("SD-555") || m.includes("SUPER SPIN")) return "SPINNER";
-  return PRODUCT_MODEL_DB[m] || "GENERAL";
+// --- FIXED SYSTEM CONSTANTS ---
+const SYSTEM_RULES = {
+  DATE_PRESETS: [
+    { label: "Today", value: "today" },
+    { label: "Yesterday", value: "yesterday" },
+    { label: "Last Week", value: "last_week" },
+    { label: "Current Month", value: "curr_month" },
+    { label: "Last 3 Months", value: "last_3m" },
+    { label: "Current Year", value: "curr_year" },
+    { label: "Last Year Fiscal", value: "fiscal" },
+    { label: "All Time", value: "all" },
+    { label: "Date Range", value: "range" }
+  ],
+  STATUSES: [
+    "PENDING", "PARTY LIFTING", "READY TO DELIVER", "ONLINE", "NOT RESPONDING", 
+    "PARTS REQ (TECH)", "ON ROUTE", "PART NOT AVAILABLE", "PART TO ATTEND", 
+    "PFA (CUSTOMER)", "PFA (HEAD OFFICE)", "SERVICE CENTRE LIFTING", "COMPLETED", "CANCEL", "TEMPORARY CLOSED", "VERIFIED"
+  ],
+  PRODUCT_CATEGORIES: Array.from(new Set(Object.values(PRODUCT_MODEL_DB))).sort(),
+  WARRANTY_POINTS: [
+    "1. Visit charges of PKR 1000 apply after 1 year of purchase date.",
+    "2. 1 year parts warranty.",
+    "3. Motor and PCB warranty as per mentioned on warranty card.",
+    "4. No warranty claim for any kind of mouse cutting, physical damage, burning, or short-circuit.",
+    "5. Product will be consider OUT WARRANTY if repaired by unauthorised technician.",
+    "6. Company is committed to attend complaints within 24-72 working hours (3 working days).",
+    "7. Original Warranty Card and dealer invoice is mandatory to show for any claim."
+  ]
 };
 
-const matchTechnician = (input: string): string => {
-  const name = String(input || "").toUpperCase().trim();
-  if (!name || name === "UNASSIGNED" || name === "---") return "UNASSIGNED";
-  const found = INITIAL_TECHNICIANS.find(t => 
-    t.name.toUpperCase().includes(name) || 
-    name.includes(t.name.toUpperCase()) ||
-    t.importKey.toUpperCase().includes(name)
-  );
-  return found ? found.name : name;
+// --- DB Operations ---
+const DB_KEY_COMPLAINTS = 'superasia_v12_enterprise_stable';
+const DB_KEY_STAFF = 'superasia_v2_staff_db';
+
+const SuperAsiaDB = {
+  getComplaints: (): Complaint[] => {
+    const data = localStorage.getItem(DB_KEY_COMPLAINTS);
+    return data ? JSON.parse(data) : [];
+  },
+  saveComplaints: (complaints: Complaint[]) => {
+    localStorage.setItem(DB_KEY_COMPLAINTS, JSON.stringify(complaints));
+  },
+  getStaff: (): Staff[] => {
+    const data = localStorage.getItem(DB_KEY_STAFF);
+    if (!data) {
+      const initial: Staff[] = [
+        { id: '1', name: "BALAJ ANSARI", contact: "0315 2753537", position: "ADMIN", loginId: "BALAJ", password: "123", importKey: "BALAJ ANSARI", status: "ACTIVE" },
+        { id: 'dev', name: "SA-DEV-ROOT", contact: "DEV-SYSTEM-786", position: "DEVELOPER", loginId: "DEV", password: "786", importKey: "DEV", status: "ACTIVE" },
+        ...INITIAL_TECHNICIANS.map(t => ({ ...t, status: 'ACTIVE' as const, position: t.position as 'TECHNICIAN' }))
+      ];
+      localStorage.setItem(DB_KEY_STAFF, JSON.stringify(initial));
+      return initial;
+    }
+    return JSON.parse(data);
+  },
+  saveStaff: (staff: Staff[]) => {
+    localStorage.setItem(DB_KEY_STAFF, JSON.stringify(staff));
+  }
 };
 
 // --- Types ---
-type AppState = 'portal' | 'admin-dash' | 'admin-analytics' | 'admin-today' | 'technician-dash';
+type AppState = 'portal' | 'admin-dash' | 'admin-analytics' | 'admin-today' | 'admin-staff' | 'technician-dash';
 
 interface Complaint {
   id: string; 
@@ -72,22 +115,30 @@ interface Staff {
   status: 'ACTIVE' | 'INACTIVE';
 }
 
-const ADMIN_STATUSES = [
-  "PENDING", "PARTY LIFTING", "READY TO DELIVER", "ONLINE", "NOT RESPONDING", 
-  "PARTS REQ (TECH)", "ON ROUTE", "PART NOT AVAILABLE", "PART TO ATTEND", 
-  "PFA (CUSTOMER)", "PFA (HEAD OFFICE)", "SERVICE CENTRE LIFTING", "COMPLETED", "CANCEL", "TEMPORARY CLOSED", "VERIFIED"
-];
+// --- Helper Functions ---
+const getProduct = (model: string) => {
+  const m = String(model || "").toUpperCase().trim();
+  if (m.includes("SD-555") || m.includes("SUPER SPIN")) return "SPINNER";
+  return PRODUCT_MODEL_DB[m] || "GENERAL";
+};
 
-const TECH_ALLOWED_STATUSES = ["PENDING", "TEMPORARY CLOSED"];
-
-const DB_KEY_COMPLAINTS = 'superasia_v12_enterprise_stable';
-const DB_KEY_STAFF = 'superasia_v2_staff_db';
+const matchTechnician = (input: string): string => {
+  const name = String(input || "").toUpperCase().trim();
+  if (!name || name === "UNASSIGNED" || name === "---" || name === "0") return "UNASSIGNED";
+  const staff = SuperAsiaDB.getStaff();
+  const found = staff.find(t => 
+    t.name.toUpperCase() === name || 
+    t.importKey.toUpperCase() === name ||
+    t.name.toUpperCase().includes(name) || 
+    name.includes(t.name.toUpperCase())
+  );
+  return found ? found.name : name;
+};
 
 // --- Date Utils ---
 const standardizeDate = (val: any, includeTime = false): string => {
   if (val === undefined || val === null || val === "") return "";
   let date: Date;
-
   const numericVal = typeof val === 'number' ? val : parseFloat(String(val));
   if (!isNaN(numericVal) && numericVal > 30000 && numericVal < 60000) {
     const dateSerial = Math.floor(numericVal);
@@ -120,30 +171,22 @@ const standardizeDate = (val: any, includeTime = false): string => {
         if (s.toLowerCase().includes('am') && hh === 12) hh = 0;
         date.setHours(hh, min, 0, 0);
       }
-    } else {
-      date = new Date(s);
-    }
+    } else { date = new Date(s); }
   }
-
   if (isNaN(date.getTime())) return String(val);
-
   const dd = String(date.getDate()).padStart(2, '0');
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yyyy = date.getFullYear();
   let result = `${dd}-${mm}-${yyyy}`;
-
   if (includeTime) {
     const hh = String(date.getHours()).padStart(2, '0');
     const min = String(date.getMinutes()).padStart(2, '0');
     result += ` ${hh}:${min}`;
   }
-
   return result;
 };
 
-const getPKDate = (includeTime = false) => {
-  return standardizeDate(new Date(), includeTime);
-};
+const getPKDate = (includeTime = false) => standardizeDate(new Date(), includeTime);
 
 const parseStandardDate = (dateStr: string): Date | null => {
   if (!dateStr) return null;
@@ -160,31 +203,7 @@ const calculateAging = (regDateStr: string): number => {
   return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
 };
 
-// --- DB Logic ---
-const SuperAsiaDB = {
-  getComplaints: (): Complaint[] => {
-    const data = localStorage.getItem(DB_KEY_COMPLAINTS);
-    return data ? JSON.parse(data) : [];
-  },
-  saveComplaints: (complaints: Complaint[]) => {
-    localStorage.setItem(DB_KEY_COMPLAINTS, JSON.stringify(complaints));
-  },
-  getStaff: (): Staff[] => {
-    const data = localStorage.getItem(DB_KEY_STAFF);
-    if (!data) {
-      const initial: Staff[] = [
-        { id: '1', name: "BALAJ ANSARI", contact: "0315 2753537", position: "ADMIN", loginId: "BALAJ", password: "123", importKey: "BALAJ ANSARI", status: "ACTIVE" },
-        { id: 'dev', name: "SA-DEV-ROOT", contact: "DEV-SYSTEM-786", position: "DEVELOPER", loginId: "DEV", password: "786", importKey: "DEV", status: "ACTIVE" },
-        ...INITIAL_TECHNICIANS as Staff[]
-      ];
-      localStorage.setItem(DB_KEY_STAFF, JSON.stringify(initial));
-      return initial;
-    }
-    return JSON.parse(data);
-  }
-};
-
-// --- UI Components ---
+// --- Shared Components ---
 const SuperAsiaBranding = ({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) => (
   <div className="flex items-center gap-3 select-none">
     <div className="bg-blue-600 p-2 rounded-xl shadow-lg shadow-blue-600/20">
@@ -192,7 +211,7 @@ const SuperAsiaBranding = ({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) => (
     </div>
     <div>
       <h1 className={`${size === 'sm' ? 'text-xs' : size === 'md' ? 'text-lg' : 'text-2xl'} font-black tracking-tighter text-blue-600 leading-none`}>SUPER ASIA</h1>
-      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-1">Enterprise Core Platform</p>
+      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-1">Enterprise Solution</p>
     </div>
   </div>
 );
@@ -200,106 +219,48 @@ const SuperAsiaBranding = ({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) => (
 const StatusBadge = ({ status }: { status: string }) => {
   const isVerified = status === 'VERIFIED' || status === 'COMPLETED';
   return (
-    <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase whitespace-nowrap shadow-sm border-2 ${isVerified ? 'bg-blue-600 text-white border-blue-700' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
+    <span className={`px-1 py-0.5 rounded text-[7px] font-black uppercase whitespace-nowrap border ${isVerified ? 'bg-blue-600 text-white border-blue-700' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
       {status}
     </span>
   );
 };
 
-// --- Shared Components for Admin ---
-const StatCard = ({ label, value, icon: Icon, color }: any) => {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-600 shadow-blue-600/20",
-    emerald: "bg-emerald-600 shadow-emerald-600/20",
-    orange: "bg-orange-600 shadow-orange-600/20"
-  };
-  return (
-    <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-slate-100 flex items-center gap-6">
-      <div className={`${colors[color] || colors.blue} p-5 rounded-[2rem] text-white shadow-xl`}>
-        <Icon size={24} />
-      </div>
-      <div>
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
-        <p className="text-3xl font-black text-slate-900">{value.toLocaleString()}</p>
-      </div>
-    </div>
-  );
-};
-
-const AnalyticsDashboard = ({ complaints }: { complaints: Complaint[] }) => {
-  const stats = useMemo(() => {
-    const total = complaints.length;
-    const completed = complaints.filter(c => c.status === 'COMPLETED' || c.status === 'VERIFIED').length;
-    const pending = complaints.filter(c => c.status === 'PENDING').length;
-    const byProduct: Record<string, number> = {};
-    complaints.forEach(c => {
-      if (c.product) byProduct[c.product] = (byProduct[c.product] || 0) + 1;
-    });
-    const topProducts = Object.entries(byProduct).sort((a,b) => b[1] - a[1]).slice(0, 5);
-    return { total, completed, pending, topProducts };
-  }, [complaints]);
-
-  return (
-    <div className="space-y-10 max-w-7xl mx-auto pb-20">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-         <StatCard label="Total Nodes" value={stats.total} icon={Database} color="blue" />
-         <StatCard label="Resolved" value={stats.completed} icon={CheckCircle2} color="emerald" />
-         <StatCard label="In Queue" value={stats.pending} icon={Clock} color="orange" />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-10 rounded-[3.5rem] shadow-xl border border-slate-100">
-           <h3 className="text-xl font-black tracking-tighter text-slate-900 uppercase mb-8">Asset Distribution</h3>
-           <div className="space-y-6">
-              {stats.topProducts.map(([name, count]) => (
-                <div key={name} className="space-y-2">
-                   <div className="flex justify-between text-[10px] font-black uppercase">
-                      <span className="text-slate-500">{name}</span>
-                      <span className="text-blue-600">{count} Units</span>
-                   </div>
-                   <div className="h-2 bg-slate-50 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.3)]" style={{ width: `${stats.total > 0 ? (count / stats.total) * 100 : 0}%` }} />
-                   </div>
-                </div>
-              ))}
-           </div>
-        </div>
-        <div className="bg-[#0F172A] p-10 rounded-[3.5rem] shadow-xl text-white flex flex-col">
-           <h3 className="text-xl font-black tracking-tighter uppercase mb-8">Performance Efficiency</h3>
-           <div className="flex-1 flex flex-col items-center justify-center">
-              <div className="text-7xl font-black text-blue-500 mb-2">
-                {stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%
-              </div>
-              <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Overall Sync Completion</p>
-           </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const MultiSelect = ({ label, options, selected, onChange, icon: Icon }: any) => {
   const [isOpen, setIsOpen] = useState(false);
+  const isAllSelected = selected.length === options.length;
+
+  const toggleAll = () => {
+    if (isAllSelected) onChange([]);
+    else onChange([...options]);
+  };
+
   return (
     <div className="relative">
-      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-3 bg-white border-2 border-slate-100 rounded-2xl px-6 py-3.5 text-[10px] font-black uppercase text-slate-600 hover:border-blue-600 transition-all shadow-sm group">
-        {Icon && <Icon size={16} className="text-blue-600 group-hover:scale-110 transition-transform" />}
+      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-2 bg-white border border-slate-200 rounded px-2 py-1 text-[8px] font-black uppercase text-slate-600 hover:border-blue-600 transition-all">
+        {Icon && <Icon size={10} className="text-blue-600" />}
         <span>{label} ({selected.length})</span>
-        <ChevronDown size={14} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown size={10} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 mt-3 w-72 bg-white border border-slate-200 rounded-[2.5rem] shadow-2xl z-50 p-6 max-h-[450px] overflow-y-auto custom-scrollbar animate-in fade-in zoom-in-95 duration-200">
-            <div className="space-y-1">
+          <div className="absolute right-0 mt-1 w-56 bg-white border border-slate-200 rounded shadow-2xl z-50 p-2 max-h-[300px] overflow-y-auto custom-scrollbar animate-in fade-in zoom-in-95 duration-200">
+            <button onClick={toggleAll} className="w-full flex items-center gap-2 p-2 mb-1 hover:bg-blue-50 rounded transition-all border border-blue-100">
+               <div className={`w-3 h-3 rounded border flex items-center justify-center transition-all ${isAllSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-300'}`}>
+                 {isAllSelected && <Check size={8} className="text-white"/>}
+               </div>
+               <span className="text-[9px] font-black text-blue-600 uppercase">Select All</span>
+            </button>
+            <div className="space-y-0.5">
               {options.map((opt: string) => (
-                <label key={opt} className="flex items-center gap-3 p-3.5 hover:bg-slate-50 rounded-2xl cursor-pointer transition-all group">
+                <label key={opt} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded cursor-pointer transition-all group">
                   <input type="checkbox" checked={selected.includes(opt)} onChange={() => {
                       const next = selected.includes(opt) ? selected.filter((s: string) => s !== opt) : [...selected, opt];
                       onChange(next);
                     }}
-                    className="w-5 h-5 rounded-lg border-slate-300 text-blue-600 focus:ring-blue-600 transition-all cursor-pointer"
+                    className="w-3 h-3 rounded border-slate-300 text-blue-600 focus:ring-blue-600 transition-all cursor-pointer"
                   />
-                  <span className="text-[11px] font-black text-slate-700 uppercase group-hover:text-blue-600 transition-all">{opt}</span>
+                  <span className="text-[9px] font-black text-slate-700 uppercase group-hover:text-blue-600 transition-all">{opt}</span>
                 </label>
               ))}
             </div>
@@ -310,42 +271,204 @@ const MultiSelect = ({ label, options, selected, onChange, icon: Icon }: any) =>
   );
 };
 
-const DateRangePresets = ({ range, onChange }: any) => {
+const StandardDateFilter = ({ range, onChange }: any) => {
   const [isOpen, setIsOpen] = useState(false);
-  const presets = [
-    { label: "Today", get: () => { const d = getPKDate(); return { start: d, end: d, label: "Today" }; } },
-    { label: "Yesterday", get: () => { 
-        const d = new Date(); d.setDate(d.getDate() - 1); 
-        const ds = standardizeDate(d);
-        return { start: ds, end: ds, label: "Yesterday" }; 
-    } },
-    { label: "Last 7 Days", get: () => {
-        const end = new Date(); 
-        const start = new Date(); start.setDate(start.getDate() - 7);
-        return { start: standardizeDate(start), end: standardizeDate(end), label: "Last 7 Days" };
-    } },
-    { label: "All Database", get: () => ({ start: "", end: "", label: "" }) }
-  ];
+  const [isRangeOpen, setIsRangeOpen] = useState(false);
+  const [customRange, setCustomRange] = useState({ start: "", end: "" });
+  const today = getPKDate();
+
+  const handleSelect = (rule: string) => {
+    if (rule === 'range') {
+        setIsRangeOpen(true);
+        return;
+    }
+    let start = "", end = "", label = "";
+    const now = new Date();
+    switch(rule) {
+      case 'today': start = end = today; label = "Today"; break;
+      case 'yesterday': 
+        const y = new Date(); y.setDate(y.getDate() - 1);
+        start = end = standardizeDate(y); label = "Yesterday"; break;
+      case 'last_week':
+        const lw_s = new Date(); lw_s.setDate(now.getDate() - 7);
+        start = standardizeDate(lw_s); end = today; label = "Last 7 Days"; break;
+      case 'curr_month':
+        start = standardizeDate(new Date(now.getFullYear(), now.getMonth(), 1));
+        end = today; label = "Current Month"; break;
+      case 'last_3m':
+        start = standardizeDate(new Date(now.getFullYear(), now.getMonth() - 3, 1));
+        end = today; label = "Last 3 Months"; break;
+      case 'curr_year':
+        start = standardizeDate(new Date(now.getFullYear(), 0, 1));
+        end = today; label = "Current Year"; break;
+      case 'fiscal':
+        start = standardizeDate(new Date(now.getFullYear() - 1, 6, 1));
+        end = standardizeDate(new Date(now.getFullYear(), 5, 30));
+        label = "Fiscal Year"; break;
+      case 'all': start = end = ""; label = "All Data"; break;
+    }
+    onChange({ start, end, label });
+    setIsOpen(false);
+  };
 
   return (
     <div className="relative">
-      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-3 bg-white border-2 border-slate-100 rounded-2xl px-6 py-3.5 text-[10px] font-black uppercase text-slate-600 hover:border-blue-600 transition-all shadow-sm group">
-        <Calendar size={16} className="text-blue-600 group-hover:scale-110 transition-transform" />
-        <span>{range.label || "Timeline filter"}</span>
-        <ChevronDown size={14} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+      <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-2 bg-white border border-slate-200 rounded px-2 py-1 text-[8px] font-black uppercase text-slate-600 hover:border-blue-600 transition-all shadow-sm">
+        <Calendar size={10} className="text-blue-600" />
+        <span>{range.label || "Date Filter"}</span>
+        <ChevronDown size={10} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 mt-3 w-60 bg-white border border-slate-200 rounded-[2.5rem] shadow-2xl z-50 p-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {presets.map(p => (
-              <button key={p.label} onClick={() => { onChange(p.get()); setIsOpen(false); }} className="w-full text-left px-6 py-4 hover:bg-blue-50 text-[11px] font-black uppercase text-slate-600 hover:text-blue-600 rounded-2xl transition-all">
-                {p.label}
+          <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded shadow-2xl z-50 p-1 animate-in fade-in zoom-in-95 duration-200">
+            {SYSTEM_RULES.DATE_PRESETS.map(d => (
+              <button key={d.value} onClick={() => handleSelect(d.value)} className="w-full text-left px-3 py-1.5 hover:bg-blue-50 text-[9px] font-black uppercase text-slate-600 hover:text-blue-600 rounded transition-all">
+                {d.label}
               </button>
             ))}
+            
+            {isRangeOpen && (
+              <div className="p-2 border-t border-slate-100 mt-1 space-y-2 bg-slate-50">
+                <input type="date" className="w-full text-[9px] p-1.5 rounded border border-slate-200 outline-none" onChange={e => setCustomRange({...customRange, start: standardizeDate(e.target.value)})} />
+                <input type="date" className="w-full text-[9px] p-1.5 rounded border border-slate-200 outline-none" onChange={e => setCustomRange({...customRange, end: standardizeDate(e.target.value)})} />
+                <button onClick={() => {
+                    onChange({ start: customRange.start, end: customRange.end, label: "Custom Range" });
+                    setIsOpen(false);
+                }} className="w-full bg-blue-600 text-white p-1.5 rounded text-[8px] font-black uppercase">Apply</button>
+              </div>
+            )}
           </div>
         </>
       )}
+    </div>
+  );
+};
+
+// --- Staff Management ---
+const StaffManagement = () => {
+  const [staff, setStaff] = useState<Staff[]>([]);
+  useEffect(() => { setStaff(SuperAsiaDB.getStaff()); }, []);
+
+  const toggleStatus = (id: string) => {
+    const next = staff.map(s => s.id === id ? { ...s, status: (s.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE') as any } : s);
+    setStaff(next);
+    SuperAsiaDB.saveStaff(next);
+  };
+
+  return (
+    <div className="p-4 space-y-4 max-w-7xl mx-auto">
+      <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+           <div>
+              <h2 className="text-lg font-black uppercase tracking-tighter text-slate-900">Personnel Directory</h2>
+           </div>
+           <button className="bg-blue-600 text-white px-4 py-2 rounded text-[8px] font-black uppercase flex items-center gap-2 hover:bg-blue-700 transition-all shadow shadow-blue-600/20"><UserPlus size={14}/> Add New Member</button>
+        </div>
+        <div className="overflow-x-auto">
+           <table className="w-full text-left text-[10px]">
+              <thead>
+                 <tr className="bg-slate-50 text-[8px] font-black uppercase text-slate-400">
+                    <th className="px-4 py-3">Member Name</th>
+                    <th className="px-4 py-3">Login Profile</th>
+                    <th className="px-4 py-3">Position</th>
+                    <th className="px-4 py-3">Connectivity</th>
+                    <th className="px-4 py-3">Availability</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                 </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                 {staff.map(s => (
+                   <tr key={s.id} className="hover:bg-blue-50/30 transition-all group">
+                      <td className="px-4 py-2 font-black text-slate-900 uppercase group-hover:text-blue-600">{s.name}</td>
+                      <td className="px-4 py-2 font-mono text-blue-600 font-black">{s.loginId}</td>
+                      <td className="px-4 py-2">
+                        <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-[7px] font-black uppercase border border-slate-200">{s.position}</span>
+                      </td>
+                      <td className="px-4 py-2 font-bold text-slate-500">{s.contact}</td>
+                      <td className="px-4 py-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase ${s.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                         <button onClick={() => toggleStatus(s.id)} className={`p-1.5 rounded transition-all ${s.status === 'ACTIVE' ? 'text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white shadow-sm' : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-600 hover:text-white shadow-sm'}`}>
+                            {s.status === 'ACTIVE' ? <UserMinus size={14}/> : <UserCheck size={14}/>}
+                         </button>
+                      </td>
+                   </tr>
+                 ))}
+              </tbody>
+           </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Form ---
+const ComplaintForm = ({ onCancel, onSubmit }: any) => {
+  const [data, setData] = useState({
+    complaintNo: "", workOrder: "", model: "", serialNo: "", dop: "",
+    customerName: "", phoneNo: "", address: "", problemDescription: "", priority: "NORMAL"
+  });
+
+  return (
+    <div className="bg-white w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+       <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-black uppercase tracking-tighter">Register Strategic Ticket</h2>
+          </div>
+          <button onClick={onCancel} className="p-2 bg-white border border-slate-200 rounded-full hover:bg-rose-50 transition-all"><X size={18}/></button>
+       </div>
+       <div className="flex-1 overflow-auto p-8 space-y-6 custom-scrollbar">
+          <div className="grid grid-cols-2 gap-4">
+             <div className="space-y-1.5">
+                <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Complaint No</label>
+                <input required value={data.complaintNo} onChange={e=>setData({...data, complaintNo: e.target.value.toUpperCase()})} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[12px] font-bold outline-none focus:border-blue-600" placeholder="SA-00000" />
+             </div>
+             <div className="space-y-1.5">
+                <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Work Order (WO Reference)</label>
+                <input required value={data.workOrder} onChange={e=>setData({...data, workOrder: e.target.value.toUpperCase()})} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[12px] font-bold outline-none focus:border-blue-600" placeholder="WO-00000" />
+             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+             <div className="space-y-1.5">
+                <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Appliance Model</label>
+                <input required value={data.model} onChange={e=>setData({...data, model: e.target.value.toUpperCase()})} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[12px] font-bold outline-none focus:border-blue-600" placeholder="Model Identity..." />
+             </div>
+             <div className="space-y-1.5">
+                <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Serial Number</label>
+                <input value={data.serialNo} onChange={e=>setData({...data, serialNo: e.target.value.toUpperCase()})} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[12px] font-bold outline-none focus:border-blue-600" placeholder="SA-SERIAL-000" />
+             </div>
+          </div>
+          <div className="space-y-1.5">
+             <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Customer Full Identity</label>
+             <input required value={data.customerName} onChange={e=>setData({...data, customerName: e.target.value.toUpperCase()})} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[12px] font-bold outline-none focus:border-blue-600" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+             <div className="space-y-1.5">
+                <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Phone Number</label>
+                <input required value={data.phoneNo} onChange={e=>setData({...data, phoneNo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[12px] font-bold outline-none focus:border-blue-600" placeholder="03XXXXXXXXX" />
+             </div>
+             <div className="space-y-1.5">
+                <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Date of Purchase (DOP)</label>
+                <input value={data.dop} onChange={e=>setData({...data, dop: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[12px] font-bold outline-none focus:border-blue-600" placeholder="DD-MM-YYYY" />
+             </div>
+          </div>
+          <div className="space-y-1.5">
+             <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Full Deployment Address</label>
+             <textarea value={data.address} onChange={e=>setData({...data, address: e.target.value.toUpperCase()})} className="w-full bg-slate-50 border border-slate-200 rounded p-4 text-[12px] font-bold outline-none focus:border-blue-600 h-24 resize-none" />
+          </div>
+          <div className="space-y-1.5">
+             <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Problem Description</label>
+             <textarea value={data.problemDescription} onChange={e=>setData({...data, problemDescription: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded p-4 text-[12px] font-bold outline-none focus:border-blue-600 h-24 resize-none" />
+          </div>
+       </div>
+       <div className="p-6 bg-slate-50 border-t flex gap-4">
+          <button onClick={onCancel} className="flex-1 py-3 bg-white border border-slate-200 rounded font-black uppercase text-[10px]">Cancel</button>
+          <button onClick={() => onSubmit({...data, product: getProduct(data.model)})} className="flex-1 py-3 bg-blue-600 text-white rounded font-black uppercase text-[10px] shadow-lg shadow-blue-600/20">Publish</button>
+       </div>
     </div>
   );
 };
@@ -357,173 +480,124 @@ const TechnicianDash = ({ user, onLogout }: { user: Staff, onLogout: () => void 
   const [filter, setFilter] = useState('ALL');
 
   useEffect(() => { load(); }, []);
-
-  const load = () => {
-    const raw = SuperAsiaDB.getComplaints();
-    const myJobs = raw.filter(c => c.techName === user.name);
-    setComplaints(myJobs);
-  };
+  const load = () => { setComplaints(SuperAsiaDB.getComplaints().filter(c => c.techName === user.name)); };
 
   const updateCase = (id: string, partial: Partial<Complaint>) => {
-    const today = getPKDate(true);
     const all = SuperAsiaDB.getComplaints();
-    const updated = all.map(c => c.id === id ? { ...c, ...partial, updateDate: today } : c);
+    const updated = all.map(c => c.id === id ? { ...c, ...partial, updateDate: getPKDate(true) } : c);
     SuperAsiaDB.saveComplaints(updated);
     setComplaints(updated.filter(c => c.techName === user.name));
-    if (selectedCase && selectedCase.id === id) {
-      setSelectedCase({ ...selectedCase, ...partial, updateDate: today });
-    }
+    if (selectedCase && selectedCase.id === id) setSelectedCase({ ...selectedCase, ...partial });
   };
-
-  const addTimestamp = () => {
-    if (!selectedCase) return;
-    const now = getPKDate(true);
-    const newRemarks = `${selectedCase.remarks}\n[${now}]: `;
-    updateCase(selectedCase.id, { remarks: newRemarks });
-  };
-
-  const filtered = complaints.filter(c => filter === 'ALL' || c.status === filter);
-  const todayGoal = useMemo(() => {
-    const today = getPKDate();
-    const tJobs = complaints.filter(c => c.updateDate?.startsWith(today) || c.regDate.startsWith(today));
-    const done = tJobs.filter(c => c.status === 'COMPLETED' || c.status === 'VERIFIED').length;
-    return { total: tJobs.length, done };
-  }, [complaints]);
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans pb-20">
-      <header className="bg-[#0F172A] p-8 text-white rounded-b-[3rem] shadow-2xl space-y-6 sticky top-0 z-50">
+    <div className="min-h-screen bg-slate-50 font-sans pb-16">
+      <header className="bg-[#0F172A] p-6 text-white rounded-b-3xl shadow-2xl">
          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-3">
-               <div className="bg-blue-600 p-2 rounded-xl"><UserRound size={20}/></div>
-               <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60">Technician Terminal</p>
-                  <h2 className="text-xl font-black tracking-tighter">{user.name}</h2>
-               </div>
+            <div>
+               <p className="text-[8px] font-black uppercase text-blue-400 tracking-widest">Active Core - Technician</p>
+               <h2 className="text-base font-black uppercase tracking-tighter">{user.name}</h2>
             </div>
-            <button onClick={onLogout} className="bg-white/10 p-3 rounded-full hover:bg-rose-500 transition-all"><LogOut size={20}/></button>
-         </div>
-         <div className="bg-white/5 p-6 rounded-[2rem] border border-white/10">
-            <div className="flex justify-between text-[10px] font-black uppercase mb-3">
-               <span>Performance Log (Today)</span>
-               <span>{todayGoal.done} / {todayGoal.total} Syncs</span>
-            </div>
-            <div className="h-3 bg-white/10 rounded-full overflow-hidden">
-               <div className="h-full bg-blue-600 shadow-[0_0_15px_rgba(37,99,235,0.5)]" style={{ width: `${todayGoal.total > 0 ? (todayGoal.done / todayGoal.total) * 100 : 0}%` }} />
-            </div>
+            <button onClick={onLogout} className="bg-white/10 p-2.5 rounded-full hover:bg-rose-500 transition-all shadow-lg"><LogOut size={16}/></button>
          </div>
       </header>
-
-      <div className="p-6 space-y-6">
-         <div className="flex gap-2 overflow-auto pb-2 scrollbar-hide">
-            {['ALL', 'PENDING', 'TEMPORARY CLOSED'].map(s => (
-              <button key={s} onClick={() => setFilter(s)} className={`px-5 py-2.5 rounded-full text-[10px] font-black uppercase whitespace-nowrap transition-all border-2 ${filter === s ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-white text-slate-400 border-slate-100'}`}>
-                {s}
-              </button>
-            ))}
-         </div>
-
-         <div className="space-y-4">
-            {filtered.map(job => (
-              <div key={job.id} onClick={() => setSelectedCase(job)} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm active:scale-95 transition-all space-y-4">
-                 <div className="flex justify-between items-start">
-                    <div className="space-y-1">
-                       <h3 className="text-lg font-black tracking-tighter text-slate-900">{job.model}</h3>
-                       <p className="text-[9px] font-black text-blue-600 uppercase">Order: {job.workOrder}</p>
-                    </div>
-                    <StatusBadge status={job.status} />
-                 </div>
-                 <div className="flex items-center gap-3 text-slate-500">
-                    <MapPin size={14} className="text-blue-500"/>
-                    <p className="text-[11px] font-bold uppercase truncate">{job.address}</p>
-                 </div>
-                 <div className="pt-4 border-t flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                       <span className="text-[11px] font-black text-slate-900">{job.customerName}</span>
-                    </div>
-                    <div className="bg-slate-50 text-slate-500 px-3 py-1 rounded-lg text-[9px] font-black uppercase">{job.regDate.split(' ')[0]}</div>
-                 </div>
-              </div>
-            ))}
-         </div>
+      <div className="p-4 space-y-3">
+         {complaints.filter(c => filter === 'ALL' || c.status === filter).map(job => (
+            <div key={job.id} onClick={() => setSelectedCase(job)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all hover:border-blue-600">
+               <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-[13px] font-black text-slate-900 uppercase tracking-tighter">{job.model}</h3>
+                  <StatusBadge status={job.status} />
+               </div>
+               <div className="flex items-center gap-2 text-slate-400">
+                  <MapPin size={12} className="text-blue-500 shrink-0" />
+                  <p className="text-[9px] font-bold uppercase truncate">{job.address}</p>
+               </div>
+            </div>
+         ))}
       </div>
-
       {selectedCase && (
         <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-md flex items-end animate-in slide-in-from-bottom-full duration-300">
-           <div className="bg-white w-full rounded-t-[3.5rem] max-h-[95vh] flex flex-col overflow-hidden">
-              <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+           <div className="bg-white w-full rounded-t-3xl max-h-[90vh] flex flex-col p-6 overflow-hidden shadow-2xl">
+              <div className="flex justify-between items-center mb-4">
                  <div>
-                    <h2 className="text-2xl font-black tracking-tighter text-slate-900">Calibration Terminal</h2>
-                    <p className="text-[10px] font-black text-blue-600 uppercase">Job Ref: #{selectedCase.complaintNo}</p>
+                    <h2 className="text-lg font-black uppercase tracking-tighter text-slate-900">Task Management</h2>
                  </div>
-                 <button onClick={() => setSelectedCase(null)} className="p-3 bg-white border border-slate-200 rounded-full"><X size={24}/></button>
+                 <button onClick={() => setSelectedCase(null)} className="p-2 bg-slate-50 rounded-full transition-all hover:bg-slate-100 shadow-sm"><X size={18}/></button>
               </div>
+              
+              <div className="flex-1 overflow-auto space-y-4 custom-scrollbar">
+                 <div className="bg-blue-600 p-5 rounded-xl text-white shadow-lg space-y-3 border-l-4 border-blue-400">
+                    <div className="grid grid-cols-2 gap-3 text-[10px]">
+                       <div>
+                          <label className="text-[6px] font-black uppercase text-blue-200 tracking-widest">Ticket No</label>
+                          <div className="font-black uppercase">#{selectedCase.complaintNo}</div>
+                       </div>
+                       <div>
+                          <label className="text-[6px] font-black uppercase text-blue-200 tracking-widest">Contact</label>
+                          <div className="font-black uppercase">{selectedCase.phoneNo}</div>
+                       </div>
+                       <div>
+                          <label className="text-[6px] font-black uppercase text-blue-200 tracking-widest">Customer</label>
+                          <div className="font-black uppercase truncate">{selectedCase.customerName}</div>
+                       </div>
+                       <div>
+                          <label className="text-[6px] font-black uppercase text-blue-200 tracking-widest">Model</label>
+                          <div className="font-black uppercase">{selectedCase.model}</div>
+                       </div>
+                    </div>
+                    <div className="pt-2 border-t border-white/10 text-[9px] font-bold uppercase">
+                       {selectedCase.address}
+                    </div>
+                    <div className="pt-2 border-t border-white/10 text-[9px] font-bold bg-white/10 p-2 rounded italic">
+                       "{selectedCase.problemDescription || 'No description provided'}"
+                    </div>
+                 </div>
 
-              <div className="flex-1 overflow-auto p-8 space-y-8 custom-scrollbar pb-10">
-                 <div className="grid grid-cols-1 gap-6">
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Customer Persona</label>
-                       <input type="text" value={selectedCase.customerName} onChange={e => updateCase(selectedCase.id, { customerName: e.target.value.toUpperCase() })} className="w-full bg-slate-50 border-2 border-slate-100 p-5 rounded-2xl font-bold outline-none focus:border-blue-500 shadow-sm" />
+                 <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                        <label className="text-[8px] font-black uppercase text-slate-400">Execution Status</label>
+                        <select value={selectedCase.status} onChange={e => updateCase(selectedCase.id, { status: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-[10px] font-black uppercase outline-none focus:border-blue-600">
+                        {['PENDING', 'TEMPORARY CLOSED'].map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Asset Model</label>
-                         <input type="text" value={selectedCase.model} onChange={e => updateCase(selectedCase.id, { model: e.target.value.toUpperCase() })} className="w-full bg-slate-50 border-2 border-slate-100 p-5 rounded-2xl font-bold outline-none focus:border-blue-500 shadow-sm" />
-                      </div>
-                      <div className="space-y-2">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Serial Node</label>
-                         <input type="text" value={selectedCase.serialNo || ''} onChange={e => updateCase(selectedCase.id, { serialNo: e.target.value.toUpperCase() })} className="w-full bg-slate-50 border-2 border-slate-100 p-5 rounded-2xl font-bold outline-none focus:border-blue-500 shadow-sm" placeholder="SERIAL #..." />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">D.O.P (Node Birth)</label>
-                         <input type="text" value={selectedCase.dop} onChange={e => updateCase(selectedCase.id, { dop: e.target.value })} className="w-full bg-slate-50 border-2 border-slate-100 p-5 rounded-2xl font-bold outline-none focus:border-blue-500 shadow-sm" placeholder="DD-MM-YYYY" />
-                      </div>
-                      <div className="space-y-2">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Current Status</label>
-                         <select value={selectedCase.status} onChange={e => updateCase(selectedCase.id, { status: e.target.value })} className="w-full bg-white border-2 border-slate-100 p-5 rounded-2xl font-black uppercase outline-none focus:border-blue-500 shadow-sm">
-                            {TECH_ALLOWED_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                         </select>
-                      </div>
+                    <div className="space-y-1">
+                        <label className="text-[8px] font-black uppercase text-slate-400">D.O.P</label>
+                        <input type="text" value={selectedCase.dop} onChange={e => updateCase(selectedCase.id, { dop: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-[10px] font-bold outline-none" placeholder="DD-MM-YYYY" />
                     </div>
                  </div>
-                 <div className="space-y-4">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex justify-between px-4">
-                       <span>Live Action Logs</span>
-                       <span className="text-blue-600">Sync: {selectedCase.updateDate || '---'}</span>
-                    </label>
-                    <div className="relative">
-                       <textarea value={selectedCase.remarks} onChange={e => updateCase(selectedCase.id, { remarks: e.target.value })} className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] p-8 text-sm font-bold min-h-[12rem] outline-none focus:border-blue-500 shadow-inner resize-none" />
-                       <button onClick={addTimestamp} className="absolute right-6 bottom-6 p-4 bg-blue-600 text-white rounded-2xl shadow-xl active:scale-90"><Clock size={20}/></button>
+
+                 <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                        <label className="text-[8px] font-black uppercase text-slate-400">Product</label>
+                        <input type="text" value={selectedCase.product} onChange={e => updateCase(selectedCase.id, { product: e.target.value.toUpperCase() })} className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-[10px] font-bold outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[8px] font-black uppercase text-slate-400">Model</label>
+                        <input type="text" value={selectedCase.model} onChange={e => updateCase(selectedCase.id, { model: e.target.value.toUpperCase() })} className="w-full bg-slate-50 border border-slate-200 rounded p-2 text-[10px] font-bold outline-none" />
                     </div>
                  </div>
-                 <div className="space-y-6 bg-slate-900 p-8 rounded-[3rem] border border-white/5 shadow-2xl">
-                    <p className="text-[10px] font-black text-white/40 uppercase tracking-widest text-center">Settlement Matrix</p>
-                    <div className="grid grid-cols-3 gap-6">
-                       <div className="text-center">
-                          <label className="text-[8px] font-black uppercase text-white/30">Visit</label>
-                          <input type="number" value={selectedCase.visitCharges} onChange={e => updateCase(selectedCase.id, { visitCharges: parseInt(e.target.value)||0 })} className="w-full bg-transparent border-b border-white/10 text-center font-black text-xl text-white outline-none focus:border-blue-500" />
-                       </div>
-                       <div className="text-center">
-                          <label className="text-[8px] font-black uppercase text-white/30">Parts</label>
-                          <input type="number" value={selectedCase.partsCharges} onChange={e => updateCase(selectedCase.id, { partsCharges: parseInt(e.target.value)||0 })} className="w-full bg-transparent border-b border-white/10 text-center font-black text-xl text-white outline-none focus:border-blue-500" />
-                       </div>
-                       <div className="text-center">
-                          <label className="text-[8px] font-black uppercase text-white/30">Other</label>
-                          <input type="number" value={selectedCase.otherCharges} onChange={e => updateCase(selectedCase.id, { otherCharges: parseInt(e.target.value)||0 })} className="w-full bg-transparent border-b border-white/10 text-center font-black text-xl text-white outline-none focus:border-blue-500" />
-                       </div>
+
+                 <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded border border-slate-200">
+                    <div className="space-y-1">
+                        <label className="text-[7px] font-black uppercase text-slate-400">Visit Fee</label>
+                        <input type="number" value={selectedCase.visitCharges} onChange={e => updateCase(selectedCase.id, { visitCharges: Number(e.target.value) })} className="w-full bg-white border border-slate-200 rounded p-1.5 text-[10px] font-black text-blue-600 outline-none" />
                     </div>
-                    <div className="pt-6 border-t border-white/5 flex justify-between items-center px-4">
-                       <span className="text-[10px] font-black uppercase text-white/40">Grand Total</span>
-                       <span className="text-2xl font-black text-blue-500">PKR {(selectedCase.visitCharges + selectedCase.partsCharges + selectedCase.otherCharges).toLocaleString()}/-</span>
+                    <div className="space-y-1">
+                        <label className="text-[7px] font-black uppercase text-slate-400">Parts Fee</label>
+                        <input type="number" value={selectedCase.partsCharges} onChange={e => updateCase(selectedCase.id, { partsCharges: Number(e.target.value) })} className="w-full bg-white border border-slate-200 rounded p-1.5 text-[10px] font-black text-blue-600 outline-none" />
                     </div>
+                    <div className="space-y-1">
+                        <label className="text-[7px] font-black uppercase text-slate-400">Other Fee</label>
+                        <input type="number" value={selectedCase.otherCharges} onChange={e => updateCase(selectedCase.id, { otherCharges: Number(e.target.value) })} className="w-full bg-white border border-slate-200 rounded p-1.5 text-[10px] font-black text-blue-600 outline-none" />
+                    </div>
+                 </div>
+
+                 <div className="space-y-1.5">
+                    <label className="text-[8px] font-black uppercase text-slate-400 ml-2">Activity Remarks Log</label>
+                    <textarea value={selectedCase.remarks} onChange={e => updateCase(selectedCase.id, { remarks: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded p-3 text-[10px] font-bold h-24 resize-none outline-none focus:border-blue-600" />
                  </div>
               </div>
-              <div className="p-8 bg-white border-t flex gap-4">
-                 <button onClick={() => setSelectedCase(null)} className="flex-1 py-6 bg-slate-50 text-slate-400 rounded-3xl font-black uppercase text-[11px] hover:bg-slate-100 transition-all">Back to Feed</button>
-                 <button onClick={() => setSelectedCase(null)} className="flex-1 py-6 bg-blue-600 text-white rounded-3xl font-black uppercase text-[11px] shadow-2xl shadow-blue-600/30 active:scale-95 transition-all">Save & Close Terminal</button>
-              </div>
+              <button onClick={() => setSelectedCase(null)} className="w-full py-3 bg-blue-600 text-white rounded font-black uppercase text-[9px] mt-4 shadow shadow-blue-600/30">Submit Update</button>
            </div>
         </div>
       )}
@@ -531,497 +605,532 @@ const TechnicianDash = ({ user, onLogout }: { user: Staff, onLogout: () => void 
   );
 };
 
-// --- Admin Dashboard Main ---
+// --- Admin Dashboard ---
 const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) => {
   const [view, setView] = useState<AppState>('admin-dash');
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCase, setSelectedCase] = useState<Complaint | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 50;
+  const pageSize = 100;
+  
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [techFilter, setTechFilter] = useState<string[]>([]);
-  const [dateRange, setDateRange] = useState({ start: "", end: "", label: "" });
-
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [productFilter, setProductFilter] = useState<string[]>([]);
+  const [dateRange, setDateRange] = useState({ start: "", end: "", label: "All Data" });
 
   useEffect(() => { load(); }, []);
 
   const load = () => {
     const raw = SuperAsiaDB.getComplaints();
-    const clean = raw.map(c => ({
+    setComplaints(raw.map(c => ({
       ...c, 
       regDate: standardizeDate(c.regDate, true), 
       updateDate: standardizeDate(c.updateDate, true), 
       dop: standardizeDate(c.dop),
       aging: calculateAging(c.regDate)
-    }));
-    setComplaints(clean);
+    })));
   };
 
-  const handleExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
+  const updateCase = (id: string, partial: Partial<Complaint>) => {
+    const finalData = complaints.map(c => c.id === id ? { ...c, ...partial, updateDate: getPKDate(true) } : c);
+    setComplaints(finalData);
+    SuperAsiaDB.saveComplaints(finalData);
+    if (selectedCase && selectedCase.id === id) setSelectedCase({ ...selectedCase, ...partial, updateDate: getPKDate(true) });
+  };
+
+  const addComplaint = (formData: any) => {
+    const newCase: Complaint = {
+      ...formData,
+      id: `SA-${Date.now()}`,
+      regDate: getPKDate(true),
+      updateDate: getPKDate(true),
+      status: "PENDING",
+      techName: "UNASSIGNED",
+      aging: 0,
+      visitCharges: 0,
+      partsCharges: 0,
+      otherCharges: 0,
+      remarks: `[${getPKDate(true)}]: Case file opened.`,
+      priority: formData.priority || "NORMAL",
+      dop: standardizeDate(formData.dop)
+    };
+    const next = [newCase, ...complaints];
+    setComplaints(next);
+    SuperAsiaDB.saveComplaints(next);
+    setShowAddForm(false);
+    alert("Case Successfully Documented");
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        const data: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-        const imported = data.map((row, idx) => {
-          const getV = (hs: string[]) => {
-            const f = Object.keys(row).find(k => hs.includes(k.toUpperCase().trim()));
-            return f ? row[f] : "";
-          };
-          const m = String(getV(["MODEL"]));
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data: any[] = XLSX.utils.sheet_to_json(ws);
+        const imported: Complaint[] = data.map((row, idx) => {
+          const m = String(row["MODEL"] || row["Model"] || row["Appliance Model"] || "");
+          const techInput = String(row["TECH NAME"] || row["TECHNICIAN"] || row["Technician"] || row["Tech"] || "UNASSIGNED");
           return {
             id: `IMP-${Date.now()}-${idx}`,
-            workOrder: String(getV(["WORK ORDER", "WO"])),
-            product: getProduct(m),
-            priority: String(getV(["PRIORITY"])) || "NORMAL",
-            regDate: standardizeDate(getV(["REG DATE", "DATE"]), true),
-            complaintNo: String(getV(["COMPLAINT NO", "NO"])),
-            status: String(getV(["STATUS"])).toUpperCase() || "PENDING",
-            techName: matchTechnician(String(getV(["TECH NAME", "TECH"]))),
-            updateDate: standardizeDate(getV(["UPDATE DATE"]), true),
-            remarks: String(getV(["REMARKS"])),
-            model: m,
-            serialNo: String(getV(["SERIAL NO", "SERIAL"])),
-            problemDescription: String(getV(["PROBLEM DESCRIPTION", "PROBLEM"])),
-            dop: standardizeDate(getV(["D.O.P", "DOP"])),
-            customerName: String(getV(["CUSTOMER NAME", "NAME"])).toUpperCase(),
-            phoneNo: String(getV(["PHONE NO", "PHONE"])),
-            address: String(getV(["ADDRESS"])).toUpperCase(),
-            aging: 0, visitCharges: 0, partsCharges: 0, otherCharges: 0
+            workOrder: String(row["WORK ORDER"] || row["Work Order"] || row["WO Reference"] || ""),
+            complaintNo: String(row["COMPLAINT NO"] || row["Complaint No"] || row["Case #"] || row["Complaint #"] || ""),
+            product: getProduct(m) || String(row["CATEGORY"] || row["Category"] || ""),
+            priority: String(row["PRIORITY"] || row["Priority"] || "NORMAL").toUpperCase(),
+            model: m.toUpperCase(),
+            serialNo: String(row["SERIAL NO"] || row["Serial #"] || ""),
+            regDate: standardizeDate(row["REG DATE"] || row["Date"] || getPKDate(), true),
+            status: String(row["STATUS"] || "PENDING").toUpperCase(),
+            techName: matchTechnician(techInput),
+            updateDate: getPKDate(true),
+            remarks: String(row["REMARKS"] || row["Remarks History"] || ""),
+            customerName: String(row["CUSTOMER NAME"] || row["Customer"] || "").toUpperCase(),
+            phoneNo: String(row["PHONE NO"] || row["Phone No"] || row["PHONE"] || row["Phone"] || row["Contact"] || ""),
+            address: String(row["ADDRESS"] || row["Address"] || "").toUpperCase(),
+            aging: 0, 
+            visitCharges: Number(row["VISIT FEE"] || row["Visit Fee"] || row["Visit Charges"] || 0), 
+            partsCharges: Number(row["PARTS FEE"] || row["Parts Fee"] || row["Parts Charges"] || 0), 
+            otherCharges: Number(row["OTHER FEE"] || row["Other Fee"] || row["Other Charges"] || 0),
+            dop: standardizeDate(row["DOP"] || row["D.O.P"] || row["Date of Purchase"] || ""),
+            problemDescription: String(row["PROBLEM DESCRIPTION"] || row["Problem Description"] || "")
           };
-        }).filter(c => c.customerName && c.customerName !== "UNDEFINED");
+        }).filter(c => c.customerName);
         SuperAsiaDB.saveComplaints([...imported, ...complaints]);
-        load(); alert("Database Synced - All Dates Re-formatted Successfully");
-      } catch (err) { alert("Data Sync Failed"); }
+        load(); alert(`${imported.length} Records Integrated Successfully`);
+      } catch (err) { alert("Core Sync Failed"); }
     };
-    reader.readAsBinaryString(file as Blob);
-  };
-
-  const updateCase = (id: string, partial: Partial<Complaint>) => {
-    const today = getPKDate(true); 
-    const finalData = complaints.map(c => c.id === id ? { ...c, ...partial, updateDate: today } : c);
-    setComplaints(finalData);
-    SuperAsiaDB.saveComplaints(finalData);
-    if (selectedCase && selectedCase.id === id) {
-      setSelectedCase({ ...selectedCase, ...partial, updateDate: today });
-    }
-  };
-
-  const addTimestamp = () => {
-    if (!selectedCase) return;
-    const now = getPKDate(true);
-    const newRemarks = `${selectedCase.remarks}\n[${now}]: `;
-    updateCase(selectedCase.id, { remarks: newRemarks });
+    reader.readAsBinaryString(file);
   };
 
   const filtered = useMemo(() => {
     let list = complaints;
+    const today = getPKDate();
+    
     if (view === 'admin-today') {
-      const today = getPKDate();
       list = list.filter(c => c.updateDate?.startsWith(today) || c.regDate.startsWith(today));
     }
+
     return list.filter(c => {
-      const sm = c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                 c.complaintNo.includes(searchTerm) || 
-                 c.phoneNo.includes(searchTerm) ||
-                 c.model.toLowerCase().includes(searchTerm.toLowerCase());
-      const stm = statusFilter.length === 0 || statusFilter.includes(c.status);
-      const tm = techFilter.length === 0 || techFilter.includes(c.techName);
-      let dm = true;
+      const matchSearch = c.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          c.complaintNo.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          c.workOrder.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchStatus = statusFilter.length === 0 || statusFilter.includes(c.status);
+      const matchTech = techFilter.length === 0 || techFilter.includes(c.techName);
+      const matchProd = productFilter.length === 0 || productFilter.includes(c.product);
+      
+      let matchDate = true;
       if (dateRange.start && dateRange.end) {
-        const sd = parseStandardDate(dateRange.start), ed = parseStandardDate(dateRange.end), cd = parseStandardDate(c.regDate);
-        if (sd && ed && cd) dm = cd >= sd && cd <= ed;
+        const sd = parseStandardDate(dateRange.start);
+        const ed = parseStandardDate(dateRange.end);
+        const cd = parseStandardDate(c.regDate);
+        if (sd && ed && cd) matchDate = cd >= sd && cd <= ed;
       }
-      return sm && stm && tm && dm;
+      return matchSearch && matchStatus && matchTech && matchProd && matchDate;
     });
-  }, [complaints, searchTerm, statusFilter, techFilter, dateRange, view]);
+  }, [complaints, searchTerm, statusFilter, techFilter, productFilter, dateRange, view]);
 
-  const todayStats = useMemo(() => {
-    const today = getPKDate();
-    const todayList = complaints.filter(c => c.updateDate?.startsWith(today) || c.regDate.startsWith(today));
-    const techMap: Record<string, Complaint[]> = {};
-    todayList.forEach(c => {
-      const tName = c.techName || "UNASSIGNED";
-      if (!techMap[tName]) techMap[tName] = [];
-      techMap[tName].push(c);
+  const todayGrouped = useMemo(() => {
+    const grouped: Record<string, Complaint[]> = {};
+    filtered.forEach(c => {
+      const t = c.techName || "UNASSIGNED";
+      if (!grouped[t]) grouped[t] = [];
+      grouped[t].push(c);
     });
-    return {
-      activePersonnel: Object.keys(techMap).length,
-      dateLabel: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase(),
-      techGrouped: Object.entries(techMap).map(([name, jobs]) => ({ name, jobs })).sort((a,b) => b.jobs.length - a.jobs.length)
-    };
-  }, [complaints]);
+    return Object.entries(grouped).sort((a,b) => b[1].length - a[1].length);
+  }, [filtered]);
 
-  const techOptions = useMemo(() => {
-    return Array.from(new Set(complaints.map(c => c.techName))).filter(Boolean).sort();
-  }, [complaints]);
-
+  const staffList = useMemo(() => SuperAsiaDB.getStaff(), []);
+  const techOptions = useMemo(() => staffList.filter(s => s.position === 'TECHNICIAN').map(t => t.name).sort(), [staffList]);
   const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  const getActionString = (status: string) => {
-    switch (status) {
-      case 'COMPLETED': return 'WORK DONE';
-      case 'VERIFIED': return 'AUDIT VERIFIED';
-      case 'TEMPORARY CLOSED': return 'SITE VISITED (HOLD)';
-      case 'PENDING': return 'READY TO ATTEND';
-      case 'ON ROUTE': return 'TRAVELLING';
-      default: return status.replace(/_/g, ' ');
-    }
+  const startResize = (column: string, startX: number, currentWidth: number) => {
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const newWidth = Math.max(50, currentWidth + (moveEvent.clientX - startX));
+      setColumnWidths(prev => ({ ...prev, [column]: newWidth }));
+    };
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
-  const getTimeOnly = (dateStr: string) => {
-    if (!dateStr) return '--:--';
-    const parts = dateStr.split(' ');
-    if (parts.length < 2) return '--:--';
-    return parts[1];
-  };
+  const ResizableHeader = ({ id, label, color, width }: { id: string, label: string, color: string, width: number }) => (
+    <th 
+      style={{ width: columnWidths[id] || width }} 
+      className={`px-2 py-2 border-r border-slate-200 relative group select-none ${color}`}
+    >
+      <div className="truncate">{label}</div>
+      <div 
+        onMouseDown={(e) => startResize(id, e.clientX, columnWidths[id] || width)}
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 z-10"
+      />
+    </th>
+  );
 
   return (
     <div className="flex h-screen bg-white font-sans overflow-hidden">
-      <aside className={`${isSidebarOpen ? 'w-72' : 'w-24'} bg-[#0F172A] flex flex-col transition-all duration-500 shadow-2xl z-50`}>
-        <div className="p-8 border-b border-white/5"><SuperAsiaBranding size="sm" /></div>
-        <div className="flex-1 py-10 overflow-y-auto custom-scrollbar">
-           <div className="px-8 mb-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">{isSidebarOpen ? 'Operations' : 'OPS'}</div>
-           <SidebarBtn icon={Database} label="Master Database" active={view === 'admin-dash'} onClick={() => setView('admin-dash')} collapsed={!isSidebarOpen} />
-           <div className="px-8 mt-10 mb-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">{isSidebarOpen ? 'Reporting' : 'RPT'}</div>
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-16'} bg-[#0F172A] flex flex-col transition-all duration-300 shadow-2xl z-50`}>
+        <div className="p-4 border-b border-white/5"><SuperAsiaBranding size="sm" /></div>
+        <div className="flex-1 py-4 overflow-y-auto custom-scrollbar">
+           <SidebarBtn icon={Database} label="Enterprise Database" active={view === 'admin-dash'} onClick={() => setView('admin-dash')} collapsed={!isSidebarOpen} />
            <SidebarBtn icon={MonitorCheck} label="Today Working" active={view === 'admin-today'} onClick={() => setView('admin-today')} collapsed={!isSidebarOpen} />
-           <SidebarBtn icon={BarChart2} label="Data Analysis" active={view === 'admin-analytics'} onClick={() => setView('admin-analytics')} collapsed={!isSidebarOpen} />
-           <div className="mx-8 my-10 border-t border-white/5 opacity-30" />
-           <SidebarBtn icon={UserPlus} label="Staff Directory" collapsed={!isSidebarOpen} />
+           <SidebarBtn icon={BarChart2} label="Statistical Hub" active={view === 'admin-analytics'} onClick={() => setView('admin-analytics')} collapsed={!isSidebarOpen} />
+           <SidebarBtn icon={Users} label="Personnel Registry" active={view === 'admin-staff'} onClick={() => setView('admin-staff')} collapsed={!isSidebarOpen} />
         </div>
-        <button onClick={onLogout} className="p-10 border-t border-white/5 text-rose-500 font-black uppercase text-[10px] flex gap-4 transition-all hover:bg-rose-500/10"><LogOut size={22}/> {isSidebarOpen && 'System Logout'}</button>
+        <button onClick={onLogout} className="p-6 border-t border-white/5 text-rose-500 font-black uppercase text-[8px] flex gap-2 hover:bg-rose-500/10 transition-all"><LogOut size={16}/> {isSidebarOpen && 'Logout'}</button>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 bg-[#F8FAFC] relative">
-        <header className="h-20 border-b border-slate-200 flex items-center justify-between px-10 bg-white z-40">
-           <div className="flex items-center gap-8">
-              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:text-blue-600 transition-all shadow-sm"><Menu size={20}/></button>
-              <h2 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
-                {view === 'admin-today' ? 'Today Working Hub' : view === 'admin-dash' ? 'Core Node Database' : 'Analytics Center'}
+      <main className="flex-1 flex flex-col min-w-0 bg-white">
+        <header className="h-14 border-b border-slate-200 flex items-center justify-between px-6 bg-white shadow-sm z-40">
+           <div className="flex items-center gap-4">
+              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 bg-slate-50 text-slate-400 rounded hover:text-blue-600 shadow-sm transition-all"><Menu size={14}/></button>
+              <h2 className="text-base font-black tracking-tighter text-slate-900 uppercase">
+                {view === 'admin-today' ? "Today Working Flow" : view === 'admin-dash' ? 'COMPLAINT MANAGEMENT' : view === 'admin-analytics' ? 'Enterprise Intelligence' : 'Member Directory'}
               </h2>
            </div>
-           <div className="flex gap-4 items-center">
-              <button onClick={() => fileRef.current?.click()} className="bg-emerald-600 text-white px-8 py-3 rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 shadow-xl shadow-emerald-600/20 active:scale-95 hover:bg-emerald-700 transition-all"><FileSpreadsheet size={18}/> Excel Sync</button>
-              <input type="file" ref={fileRef} onChange={handleExcel} className="hidden" accept=".xlsx, .xls" />
+           <div className="flex gap-2">
+              <input type="file" ref={fileRef} className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
+              <button onClick={() => setShowAddForm(true)} className="bg-blue-600 text-white px-4 py-1.5 rounded text-[8px] font-black uppercase flex items-center gap-2 hover:bg-blue-700 shadow shadow-blue-600/20"><PlusCircle size={12}/> New Case</button>
+              <button onClick={() => fileRef.current?.click()} className="bg-emerald-600 text-white px-4 py-1.5 rounded text-[8px] font-black uppercase flex items-center gap-2 hover:bg-emerald-700 shadow shadow-emerald-600/20"><FileSpreadsheet size={12}/> Excel Sync</button>
            </div>
         </header>
 
-        <div className="flex-1 overflow-auto custom-scrollbar p-10 bg-slate-50">
-          {view === 'admin-today' ? (
-            <div className="space-y-10 max-w-7xl mx-auto pb-20">
-              <div className="bg-white p-10 rounded-[3.5rem] shadow-xl shadow-slate-200/50 border border-slate-100 flex items-center justify-between transition-all hover:shadow-2xl">
-                 <div className="flex items-center gap-6">
-                    <div className="bg-blue-600 p-5 rounded-[2rem] text-white shadow-xl shadow-blue-600/30"><Clock size={32} /></div>
-                    <div>
-                       <h3 className="text-2xl font-black tracking-tighter text-slate-900 uppercase">Activity Trace</h3>
-                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Active Field Working • {todayStats.dateLabel}</p>
-                    </div>
-                 </div>
-                 <div className="bg-slate-50 px-10 py-6 rounded-[2.5rem] border border-slate-100 text-center flex flex-col items-center gap-1 min-w-[200px]">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Personnel Today</p>
-                    <p className="text-4xl font-black text-blue-600">{todayStats.activePersonnel}</p>
-                 </div>
-              </div>
-
-              <div className="space-y-12">
-                 {todayStats.techGrouped.map(tg => (
-                   <div key={tg.name} className="bg-white rounded-[4rem] overflow-hidden shadow-2xl border border-slate-100 animate-in slide-in-from-bottom-8 duration-500">
-                      <div className="bg-[#0F172A] p-10 flex justify-between items-center text-white">
-                         <div className="flex items-center gap-6">
-                            <div className="bg-blue-600 p-4 rounded-2xl"><UserRound size={28}/></div>
-                            <div>
-                               <h4 className="text-2xl font-black tracking-tighter uppercase">{tg.name}</h4>
-                               <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mt-1">Technician Nodes Active</p>
-                            </div>
-                         </div>
-                         <div className="text-right">
-                            <p className="text-[10px] font-black text-white/30 uppercase tracking-widest">Handle Count</p>
-                            <p className="text-4xl font-black text-blue-500 leading-none mt-1">{tg.jobs.length}</p>
-                         </div>
-                      </div>
-                      <div className="p-4">
-                         <table className="w-full text-left">
-                            <thead>
-                               <tr className="text-[9px] font-black uppercase text-slate-400 border-b border-slate-50">
-                                  <th className="px-8 py-6">Action</th>
-                                  <th className="px-8 py-6">Job ID</th>
-                                  <th className="px-8 py-6">Customer Persona</th>
-                                  <th className="px-8 py-6">Asset Node</th>
-                                  <th className="px-8 py-6">Action Taken</th>
-                                  <th className="px-8 py-6">Timestamp</th>
-                                  <th className="px-8 py-6 text-right">Status</th>
-                               </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50">
-                               {tg.jobs.map(job => (
-                                 <tr key={job.id} className="hover:bg-slate-50/80 transition-all group">
-                                    <td className="px-8 py-6">
-                                       <button onClick={() => setSelectedCase(job)} className="p-2 bg-blue-600 text-white rounded-lg hover:scale-110 transition-transform"><Eye size={12}/></button>
-                                    </td>
-                                    <td className="px-8 py-6 font-black text-blue-600 text-[11px]">#{job.complaintNo}</td>
-                                    <td className="px-8 py-6">
-                                       <div className="text-[12px] font-black text-slate-900 uppercase">{job.customerName}</div>
-                                       <div className="text-[10px] font-bold text-slate-400 uppercase truncate max-w-[150px]">{job.address}</div>
-                                    </td>
-                                    <td className="px-8 py-6">
-                                       <div className="text-[11px] font-black text-slate-700 uppercase">{job.model}</div>
-                                    </td>
-                                    <td className="px-8 py-6">
-                                       <span className="bg-slate-100 text-slate-500 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase border border-slate-200">
-                                          {getActionString(job.status)}
-                                       </span>
-                                    </td>
-                                    <td className="px-8 py-6 font-mono text-slate-400 text-[10px]">
-                                       {getTimeOnly(job.updateDate || job.regDate)}
-                                    </td>
-                                    <td className="px-8 py-6 text-right">
-                                       <StatusBadge status={job.status} />
-                                    </td>
-                                 </tr>
-                               ))}
-                            </tbody>
-                         </table>
-                      </div>
-                   </div>
-                 ))}
-                 {todayStats.techGrouped.length === 0 && (
-                   <div className="text-center py-40 space-y-6">
-                      <div className="w-32 h-32 bg-slate-100 rounded-full flex items-center justify-center text-slate-300 mx-auto border-2 border-dashed border-slate-200"><Activity size={64} /></div>
-                      <p className="text-[12px] font-black uppercase text-slate-400 tracking-widest">No activity trace detected for {todayStats.dateLabel}</p>
-                   </div>
-                 )}
-              </div>
-            </div>
+        <div className="flex-1 overflow-auto bg-[#F8FAFC]">
+          {view === 'admin-staff' ? (
+            <StaffManagement />
           ) : view === 'admin-analytics' ? (
-            <AnalyticsDashboard complaints={complaints} />
+             <div className="p-4 space-y-4">
+                <div className="bg-white p-4 rounded border border-slate-200 flex flex-wrap gap-2 items-center justify-between shadow-sm">
+                   <h3 className="text-[10px] font-black uppercase text-slate-900">Intelligence Filters</h3>
+                   <div className="flex gap-1.5 flex-wrap">
+                      <MultiSelect label="Product" options={SYSTEM_RULES.PRODUCT_CATEGORIES} selected={productFilter} onChange={setProductFilter} icon={Package} />
+                      <MultiSelect label="Technician" options={techOptions} selected={techFilter} onChange={setTechFilter} icon={Users} />
+                      <MultiSelect label="Status" options={SYSTEM_RULES.STATUSES} selected={statusFilter} onChange={setStatusFilter} icon={ListChecks} />
+                      <StandardDateFilter range={dateRange} onChange={setDateRange} />
+                   </div>
+                </div>
+                <AnalyticsDashboard complaints={filtered} />
+             </div>
+          ) : view === 'admin-today' ? (
+            <div className="p-4 space-y-4">
+               <div className="bg-white p-4 rounded border border-slate-200 flex justify-between items-center shadow-sm">
+                  <div>
+                    <h3 className="text-lg font-black uppercase tracking-tighter text-slate-900">Today Working Workforce Flow</h3>
+                  </div>
+                  <div className="flex gap-1.5">
+                     <MultiSelect label="Technician" options={techOptions} selected={techFilter} onChange={setTechFilter} icon={Users} />
+                     <MultiSelect label="Status" options={SYSTEM_RULES.STATUSES} selected={statusFilter} onChange={setStatusFilter} icon={ListChecks} />
+                  </div>
+               </div>
+               <div className="space-y-4">
+                  {todayGrouped.map(([tech, jobs]) => (
+                    <div key={tech} className="bg-white rounded border border-slate-200 overflow-hidden shadow-sm">
+                       <div className="bg-slate-900 p-3 flex justify-between items-center text-white">
+                          <div className="flex items-center gap-2">
+                             <div className="bg-blue-600 p-1.5 rounded"><UserRound size={14}/></div>
+                             <h4 className="font-black uppercase tracking-tighter text-[13px]">{tech}</h4>
+                          </div>
+                          <span className="text-[8px] font-black uppercase bg-white/10 px-2 py-0.5 rounded">{jobs.length} Jobs</span>
+                       </div>
+                       <div className="overflow-x-auto">
+                          <table className="w-full text-left text-[10px]">
+                             <tbody className="divide-y divide-slate-100">
+                                {jobs.map(j => (
+                                  <tr key={j.id} className="hover:bg-slate-50 transition-all group">
+                                     <td className="px-4 py-2 font-black text-blue-600">#{j.complaintNo}</td>
+                                     <td className="px-4 py-2 font-black text-slate-900 uppercase">{j.customerName}</td>
+                                     <td className="px-4 py-2 font-black text-slate-700 uppercase">{j.model}</td>
+                                     <td className="px-4 py-2"><StatusBadge status={j.status} /></td>
+                                     <td className="px-4 py-2 text-right">
+                                        <button onClick={() => setSelectedCase(j)} className="p-1.5 bg-blue-600 text-white rounded hover:scale-110 shadow shadow-blue-600/20 transition-all"><Eye size={10}/></button>
+                                     </td>
+                                  </tr>
+                                ))}
+                             </tbody>
+                          </table>
+                       </div>
+                    </div>
+                  ))}
+               </div>
+            </div>
           ) : (
-            <div className="bg-white rounded-[3rem] shadow-xl border border-slate-200 overflow-hidden">
-               <div className="p-8 border-b border-slate-50 flex items-center justify-between">
-                  <div className="relative w-96">
-                    <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search Fleet Network..." className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-3 pl-12 pr-6 text-xs font-bold focus:border-blue-600 outline-none shadow-inner" />
+            <div className="p-2 h-full flex flex-col">
+               <div className="bg-white rounded shadow-md border border-slate-200 flex flex-col flex-1 overflow-hidden">
+                  <div className="p-2 border-b border-slate-100 flex items-center justify-between gap-2 flex-wrap bg-slate-50/50">
+                    <div className="relative w-full max-w-xs">
+                      <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search Name, Complaint No, WO..." className="w-full bg-white border border-slate-200 rounded py-1.5 pl-8 pr-3 text-[10px] font-bold focus:border-blue-600 outline-none" />
+                    </div>
+                    <div className="flex gap-1 flex-wrap">
+                      <MultiSelect label="Product" options={SYSTEM_RULES.PRODUCT_CATEGORIES} selected={productFilter} onChange={setProductFilter} icon={Package} />
+                      <MultiSelect label="Technician" options={techOptions} selected={techFilter} onChange={setTechFilter} icon={Users} />
+                      <MultiSelect label="Status" options={SYSTEM_RULES.STATUSES} selected={statusFilter} onChange={setStatusFilter} icon={ListChecks} />
+                      <StandardDateFilter range={dateRange} onChange={setDateRange} />
+                    </div>
                   </div>
-                  <div className="flex gap-4">
-                    <MultiSelect label="Filter Staff" options={techOptions} selected={techFilter} onChange={setTechFilter} icon={Users} />
-                    <DateRangePresets range={dateRange} onChange={setDateRange} />
+                  <div className="flex-1 overflow-auto custom-scrollbar">
+                     <table className="w-full min-w-[5000px] text-left border-collapse table-fixed">
+                       <thead>
+                          <tr className="text-[9px] font-black uppercase text-slate-900 border-b border-slate-200">
+                             <th className="px-2 py-2 sticky left-0 z-30 bg-[#10b981] border-r border-slate-200 w-[80px]">Actions</th>
+                             <ResizableHeader id="wo" label="WORK ORDER" color="bg-[#10b981]" width={120} />
+                             <ResizableHeader id="cat" label="CATEGORY" color="bg-[#fde047]" width={140} />
+                             <ResizableHeader id="pri" label="PRIORITY" color="bg-[#10b981]" width={100} />
+                             <ResizableHeader id="reg" label="REG DATE" color="bg-[#10b981]" width={140} />
+                             <ResizableHeader id="cn" label="COMPLAINT NO" color="bg-[#10b981]" width={120} />
+                             <ResizableHeader id="st" label="STATUS" color="bg-[#10b981]" width={140} />
+                             <ResizableHeader id="tn" label="TECH NAME" color="bg-[#fb923c]" width={160} />
+                             <ResizableHeader id="ud" label="UPDATE DATE" color="bg-[#10b981]" width={140} />
+                             <ResizableHeader id="rem" label="REMARKS" color="bg-[#10b981]" width={500} />
+                             <ResizableHeader id="mod" label="MODEL" color="bg-[#10b981]" width={200} />
+                             <ResizableHeader id="pd" label="PROBLEM DESCRIPTION" color="bg-[#10b981]" width={400} />
+                             <ResizableHeader id="dop" label="D.O.P" color="bg-[#10b981]" width={120} />
+                             <ResizableHeader id="cnm" label="CUSTOMER NAME" color="bg-[#10b981]" width={200} />
+                             <ResizableHeader id="ph" label="PHONE NO" color="bg-[#10b981]" width={120} />
+                             <ResizableHeader id="add" label="ADDRESS" color="bg-[#10b981]" width={300} />
+                             <ResizableHeader id="age" label="AGING" color="bg-[#000000] text-white" width={80} />
+                             <ResizableHeader id="vf" label="VISIT FEE" color="bg-[#10b981]" width={100} />
+                             <ResizableHeader id="pf" label="PARTS FEE" color="bg-[#10b981]" width={100} />
+                             <ResizableHeader id="of" label="OTHER FEE" color="bg-[#10b981]" width={100} />
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-slate-100 bg-white">
+                          {paginated.map(row => (
+                            <tr key={row.id} className="hover:bg-blue-50/50 transition-colors group">
+                               <td className="px-2 py-1 sticky left-0 z-10 bg-white border-r border-slate-100 flex gap-1.5 group-hover:bg-blue-50/50">
+                                  <button onClick={() => setSelectedCase(row)} className="p-1 bg-blue-600 text-white rounded hover:scale-110 shadow shadow-blue-600/20"><Eye size={10}/></button>
+                                  <button onClick={() => generatePDF(row)} className="p-1 bg-rose-600 text-white rounded hover:scale-110 shadow shadow-rose-600/20"><Printer size={10}/></button>
+                               </td>
+                               <td style={{ width: columnWidths['wo'] }} className="px-2 py-1 border-r border-slate-100 font-bold text-slate-500 text-[10px] truncate">{row.workOrder}</td>
+                               <td style={{ width: columnWidths['cat'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-800 text-[10px] truncate">{row.product}</td>
+                               <td style={{ width: columnWidths['pri'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-500 text-[9px] uppercase">{row.priority || 'NORMAL'}</td>
+                               <td style={{ width: columnWidths['reg'] }} className="px-2 py-1 border-r border-slate-100 font-mono text-[9px] truncate">{row.regDate}</td>
+                               <td style={{ width: columnWidths['cn'] }} className="px-2 py-1 border-r border-slate-100 font-black text-blue-600 text-[10px] truncate">#{row.complaintNo}</td>
+                               <td style={{ width: columnWidths['st'] }} className="px-2 py-1 border-r border-slate-100"><StatusBadge status={row.status} /></td>
+                               <td style={{ width: columnWidths['tn'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-800 text-[10px] truncate">{row.techName}</td>
+                               <td style={{ width: columnWidths['ud'] }} className="px-2 py-1 border-r border-slate-100 font-mono text-[9px] truncate">{row.updateDate}</td>
+                               <td style={{ width: columnWidths['rem'] }} className="px-2 py-1 border-r border-slate-100 text-[10px] text-slate-400 italic truncate">{row.remarks}</td>
+                               <td style={{ width: columnWidths['mod'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-900 text-[10px] truncate uppercase">{row.model}</td>
+                               <td style={{ width: columnWidths['pd'] }} className="px-2 py-1 border-r border-slate-100 text-[10px] text-slate-500 truncate">{row.problemDescription || '---'}</td>
+                               <td style={{ width: columnWidths['dop'] }} className="px-2 py-1 border-r border-slate-100 font-mono text-[9px] truncate">{row.dop || '---'}</td>
+                               <td style={{ width: columnWidths['cnm'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-900 text-[10px] truncate group-hover:text-blue-600">{row.customerName}</td>
+                               <td style={{ width: columnWidths['ph'] }} className="px-2 py-1 border-r border-slate-100 font-bold text-blue-600 text-[10px] whitespace-nowrap">{row.phoneNo}</td>
+                               <td style={{ width: columnWidths['add'] }} className="px-2 py-1 border-r border-slate-100 text-[10px] text-slate-500 uppercase truncate">{row.address}</td>
+                               <td style={{ width: columnWidths['age'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-900 text-[11px] text-center">{row.aging}</td>
+                               <td style={{ width: columnWidths['vf'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-600 text-right">{row.visitCharges.toLocaleString()}</td>
+                               <td style={{ width: columnWidths['pf'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-600 text-right">{row.partsCharges.toLocaleString()}</td>
+                               <td style={{ width: columnWidths['of'] }} className="px-2 py-1 border-r border-slate-100 font-black text-slate-600 text-right">{row.otherCharges.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                       </tbody>
+                     </table>
                   </div>
                </div>
-               <div className="overflow-x-auto custom-scrollbar">
-                  <table className="w-full min-w-[2000px]">
-                    <thead>
-                       <tr className="bg-slate-900 text-[10px] font-black uppercase text-white">
-                          <th className="px-6 py-5 sticky left-0 z-20 bg-slate-900 text-center">Tools</th>
-                          <th className="px-6 py-5">Order #</th>
-                          <th className="px-6 py-5">Product</th>
-                          <th className="px-6 py-5">Model</th>
-                          <th className="px-6 py-5">Reg Date</th>
-                          <th className="px-6 py-5">Customer</th>
-                          <th className="px-6 py-5">Status</th>
-                          <th className="px-6 py-5">Technician</th>
-                          <th className="px-6 py-5">Remarks</th>
-                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                       {paginated.map(row => (
-                         <tr key={row.id} className="hover:bg-blue-50/50 transition-colors">
-                            <td className="px-6 py-4 sticky left-0 z-10 bg-white border-r flex gap-2">
-                               <button onClick={() => setSelectedCase(row)} className="p-2 bg-blue-600 text-white rounded-lg hover:scale-110"><Eye size={12}/></button>
-                               <button onClick={() => generatePDF(row)} className="p-2 bg-rose-600 text-white rounded-lg hover:scale-110"><Printer size={12}/></button>
-                            </td>
-                            <td className="px-6 py-4 font-bold text-slate-900">{row.workOrder}</td>
-                            <td className="px-6 py-4 text-slate-500 font-bold">{row.product}</td>
-                            <td className="px-6 py-4 font-black text-slate-900 uppercase">{row.model}</td>
-                            <td className="px-6 py-4 text-slate-500 font-mono text-[10px]">{row.regDate}</td>
-                            <td className="px-6 py-4 font-black text-slate-900 uppercase">{row.customerName}</td>
-                            <td className="px-6 py-4"><StatusBadge status={row.status} /></td>
-                            <td className="px-6 py-4 font-bold text-blue-600">{row.techName}</td>
-                            <td className="px-6 py-4 text-slate-400 italic truncate max-w-xs">{row.remarks}</td>
-                         </tr>
-                       ))}
-                    </tbody>
-                  </table>
-               </div>
-               <footer className="p-8 border-t border-slate-50 flex items-center justify-between">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Records: {filtered.length}</span>
-                  <div className="flex gap-2">
-                     <button disabled={currentPage===1} onClick={()=>setCurrentPage(c=>c-1)} className="p-2 bg-slate-50 text-slate-400 rounded-xl hover:text-blue-600 disabled:opacity-30"><ChevronLeft size={16}/></button>
-                     <span className="px-4 py-2 bg-blue-600 text-white rounded-xl text-[10px] font-black">Page {currentPage}</span>
-                     <button disabled={currentPage===Math.ceil(filtered.length/pageSize)} onClick={()=>setCurrentPage(c=>c+1)} className="p-2 bg-slate-50 text-slate-400 rounded-xl hover:text-blue-600 disabled:opacity-30"><ChevronRight size={16}/></button>
-                  </div>
-               </footer>
             </div>
           )}
         </div>
       </main>
 
-      {/* Admin Control Override Modal - REFINED LOOK */}
+      {/* Admin Assignment & Edit Modal */}
       {selectedCase && (
-        <div className="fixed inset-0 z-[1000] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-5xl rounded-[3rem] h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-slate-100">
-            {/* Modal Header */}
-            <div className="px-10 py-10 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                   <div className="p-1.5 bg-blue-600 rounded-lg text-white"><ShieldEllipsis size={14}/></div>
-                   <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Admin Control Override</span>
-                </div>
-                <h2 className="text-4xl font-black tracking-tighter text-slate-900 uppercase leading-none">{selectedCase.model}</h2>
-                <div className="flex gap-4">
-                   <div className="bg-blue-600/10 text-blue-600 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border border-blue-600/10">Compl: #{selectedCase.complaintNo}</div>
-                   <div className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest">{selectedCase.product}</div>
-                </div>
+        <div className="fixed inset-0 z-[1000] bg-slate-950/80 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-4xl rounded-2xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div>
+                <h2 className="text-xl font-black tracking-tighter text-slate-900 uppercase">Strategic Case Panel</h2>
+                <p className="text-[9px] font-black text-blue-600 uppercase mt-0.5">#{selectedCase.complaintNo}</p>
               </div>
-              <button onClick={() => setSelectedCase(null)} className="p-4 bg-white border border-slate-200 rounded-full hover:bg-rose-50 hover:text-rose-600 shadow-sm transition-all active:scale-90"><X size={24}/></button>
+              <button onClick={() => setSelectedCase(null)} className="p-3 bg-white border border-slate-200 rounded-full hover:bg-rose-50 transition-all shadow-sm"><X size={20}/></button>
             </div>
             
-            {/* Modal Content */}
-            <div className="flex-1 overflow-auto p-10 space-y-10 custom-scrollbar bg-white">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                 <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Deployment Status</label>
-                    <select value={selectedCase.status} onChange={e => updateCase(selectedCase.id, { status: e.target.value })} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-5 font-black uppercase text-xs outline-none focus:border-blue-600 transition-all shadow-sm">
-                       {ADMIN_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            <div className="flex-1 overflow-auto p-10 space-y-8 custom-scrollbar bg-white">
+              <div className="grid grid-cols-2 gap-6">
+                 <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Assigned Technician</label>
+                    <select value={selectedCase.techName} onChange={e => updateCase(selectedCase.id, { techName: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded p-4 text-[11px] font-black uppercase outline-none focus:border-blue-600 shadow-inner">
+                       <option value="UNASSIGNED">SELECT TECHNICIAN...</option>
+                       {staffList.filter(s=>s.position==='TECHNICIAN' && s.status==='ACTIVE').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
                     </select>
                  </div>
-                 <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Assign Field Agent</label>
-                    <select value={selectedCase.techName} onChange={e => updateCase(selectedCase.id, { techName: e.target.value })} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-5 font-black uppercase text-xs outline-none focus:border-blue-600 transition-all shadow-sm">
-                       <option value="UNASSIGNED">UNASSIGNED</option>
-                       {SuperAsiaDB.getStaff().filter(s=>s.position==='TECHNICIAN').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                 <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Lifecycle Status</label>
+                    <select value={selectedCase.status} onChange={e => updateCase(selectedCase.id, { status: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded p-4 text-[11px] font-black uppercase outline-none focus:border-blue-600 shadow-inner">
+                       {SYSTEM_RULES.STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                  </div>
               </div>
-
-              <div className="space-y-4">
-                 <div className="flex justify-between items-center px-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <MessageSquare size={16} className="text-blue-600"/> Master Remark Log
-                    </label>
-                    <button onClick={addTimestamp} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 active:scale-95">
-                       <Clock size={14}/>
-                       <span className="text-[9px] font-black uppercase tracking-widest">Add Timestamp</span>
-                    </button>
+              <div className="space-y-3">
+                 <div className="flex justify-between items-center px-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><History size={12}/> Remarks Log</label>
+                    <button onClick={() => updateCase(selectedCase.id, { remarks: `${selectedCase.remarks}\n[${getPKDate(true)}]: ` })} className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-[8px] font-black uppercase shadow-lg transition-all active:scale-95"><Clock size={12}/> Timestamp</button>
                  </div>
-                 <textarea value={selectedCase.remarks} onChange={e => updateCase(selectedCase.id, { remarks: e.target.value })} className="w-full bg-slate-50 border-2 border-slate-100 rounded-3xl p-8 font-bold text-lg text-slate-800 h-[20rem] outline-none focus:border-blue-600 shadow-inner resize-none transition-all" />
+                 <textarea value={selectedCase.remarks} onChange={e => updateCase(selectedCase.id, { remarks: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded p-6 font-bold text-base text-slate-800 h-64 outline-none focus:border-blue-600 shadow-inner resize-none transition-all" />
               </div>
-
               <div className="grid grid-cols-3 gap-6">
-                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Visit PKR</label>
-                      <input type="number" value={selectedCase.visitCharges} onChange={e => updateCase(selectedCase.id, { visitCharges: parseInt(e.target.value)||0 })} className="w-full bg-transparent font-black text-2xl mt-1 outline-none text-slate-900" />
-                  </div>
-                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Parts PKR</label>
-                      <input type="number" value={selectedCase.partsCharges} onChange={e => updateCase(selectedCase.id, { partsCharges: parseInt(e.target.value)||0 })} className="w-full bg-transparent font-black text-2xl mt-1 outline-none text-slate-900" />
-                  </div>
-                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Other PKR</label>
-                      <input type="number" value={selectedCase.otherCharges} onChange={e => updateCase(selectedCase.id, { otherCharges: parseInt(e.target.value)||0 })} className="w-full bg-transparent font-black text-2xl mt-1 outline-none text-slate-900" />
-                  </div>
+                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <label className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Visit Fee</label>
+                    <input type="number" value={selectedCase.visitCharges} onChange={e => updateCase(selectedCase.id, { visitCharges: Number(e.target.value) })} className="w-full bg-transparent font-black text-xl mt-1 outline-none text-blue-600" />
+                 </div>
+                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <label className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Parts Fee</label>
+                    <input type="number" value={selectedCase.partsCharges} onChange={e => updateCase(selectedCase.id, { partsCharges: Number(e.target.value) })} className="w-full bg-transparent font-black text-xl mt-1 outline-none text-blue-600" />
+                 </div>
+                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <label className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Other Fee</label>
+                    <input type="number" value={selectedCase.otherCharges} onChange={e => updateCase(selectedCase.id, { otherCharges: Number(e.target.value) })} className="w-full bg-transparent font-black text-xl mt-1 outline-none text-blue-600" />
+                 </div>
               </div>
             </div>
             
-            {/* Modal Footer - REMOVED PRINT BUTTON */}
-            <div className="p-8 bg-slate-50 border-t border-slate-100 flex justify-end gap-4 shrink-0">
-               <button onClick={() => setSelectedCase(null)} className="px-8 py-4 bg-white border border-slate-200 rounded-2xl font-black uppercase text-[10px] hover:bg-slate-100 shadow-sm transition-all active:scale-95">Discard Changes</button>
-               <button onClick={() => { setSelectedCase(null); }} className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] shadow-xl shadow-blue-600/20 hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95">
-                  <Save size={16}/> Sync & Save Changes
-               </button>
+            <div className="p-8 bg-slate-50 border-t flex justify-end gap-4">
+               <button onClick={() => setSelectedCase(null)} className="px-6 py-3 bg-white border border-slate-200 rounded font-black uppercase text-[9px] hover:bg-slate-100 transition-all shadow-sm">Discard</button>
+               <button onClick={() => { setSelectedCase(null); }} className="px-6 py-3 bg-blue-600 text-white rounded font-black uppercase text-[9px] shadow-lg hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95"><Save size={14}/> Commit Update</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {showAddForm && (
+        <div className="fixed inset-0 z-[1000] bg-slate-950/80 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-300">
+           <ComplaintForm onCancel={() => setShowAddForm(false)} onSubmit={addComplaint} />
         </div>
       )}
     </div>
   );
 };
 
-// --- Atomic Helpers ---
+// --- Atomic Layout Helpers ---
 const SidebarBtn = ({ icon: Icon, label, active, collapsed, onClick }: any) => (
-  <button onClick={onClick} className={`w-full flex items-center gap-6 px-10 py-6 text-[11px] font-black uppercase transition-all duration-300 ${active ? 'text-blue-500 bg-blue-500/10 border-r-4 border-blue-500 shadow-inner' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
-    <Icon size={22} className={active ? 'text-blue-500' : 'text-slate-600'} /> 
-    {!collapsed && <span className="truncate tracking-[0.15em] text-left">{label}</span>}
+  <button onClick={onClick} className={`w-full flex items-center gap-4 px-6 py-4 text-[9px] font-black uppercase transition-all duration-300 ${active ? 'text-blue-500 bg-blue-500/10 border-r-4 border-blue-500 shadow-inner' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}>
+    <Icon size={16} className={active ? 'text-blue-500' : 'text-slate-600'} /> 
+    {!collapsed && <span className="truncate tracking-widest text-left">{label}</span>}
   </button>
 );
 
-// --- PDF Manifest Generator (Remains available for Admin Table buttons but removed from Modal) ---
 const generatePDF = (complaint: Complaint | null) => {
   if (!complaint) return;
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
   const total = (complaint.visitCharges||0)+(complaint.partsCharges||0)+(complaint.otherCharges||0);
   printWindow.document.write(`
-    <html><head><title>SA_MANIFEST_${complaint.complaintNo}</title><style>
-    @page { size: A4; margin: 15mm; }
-    body { font-family: 'Plus Jakarta Sans', sans-serif; color: #0f172a; line-height: 1.5; padding: 0; margin: 0; font-size: 11px; }
-    .header { border-bottom: 6px solid #2563eb; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: flex-end; }
-    .box { border: 2px solid #f1f5f9; padding: 20px; border-radius: 15px; margin-bottom: 20px; }
-    .label { font-size: 8px; font-weight: 900; color: #94a3b8; text-transform: uppercase; margin-bottom: 3px; }
-    .value { font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 10px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    .remarks-box { background: #f8fafc; padding: 25px; border-radius: 20px; border: 1px solid #e2e8f0; font-size: 12px; color: #1e293b; white-space: pre-wrap; min-height: 150px; }
-    .total-row { background: #0f172a; color: #fff; padding: 25px; border-radius: 20px; display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
-    .policy { font-size: 9px; color: #64748b; margin-top: 40px; border-top: 2px dashed #e2e8f0; padding-top: 20px; }
+    <html><head><title>SA_Ticket_${complaint.complaintNo}</title><style>
+    @page { size: A4; margin: 10mm; }
+    body { font-family: 'Plus Jakarta Sans', sans-serif; color: #0f172a; line-height: 1.3; padding: 0; margin: 0; font-size: 10.5px; }
+    .header { border-bottom: 3px solid #2563eb; padding-bottom: 10px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .box { border: 1.5px solid #f1f5f9; padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; }
+    .label { font-size: 8px; font-weight: 900; color: #94a3b8; text-transform: uppercase; margin-bottom: 2px; }
+    .value { font-size: 11.5px; font-weight: 800; color: #0f172a; margin-bottom: 6px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .remarks { background: #f8fafc; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 9.5px; white-space: pre-wrap; min-height: 80px; }
+    .total-row { background: #0f172a; color: #fff; padding: 15px 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; margin-top: 15px; }
+    .warranty { font-size: 8px; color: #64748b; margin-top: 15px; border-top: 1px dashed #e2e8f0; padding-top: 10px; }
+    .sig { margin-top: 25px; display: flex; justify-content: space-between; padding: 0 40px; }
+    .sig-line { border-top: 1.2px solid #000; width: 160px; text-align: center; padding-top: 5px; font-weight: 900; text-transform: uppercase; font-size: 7.5px; }
     </style></head><body>
     <div class="header">
-      <div><div style="font-size:32px; font-weight:900; color:#2563eb; font-style:italic;">SA</div><div style="font-weight:900; text-transform:uppercase; font-size:18px;">Super Asia Enterprise Core</div></div>
-      <div style="text-align:right; font-size:12px; font-weight:bold; color:#64748b;">MANIFEST ID: #${complaint.complaintNo}<br/>ORDER REF: ${complaint.workOrder}<br/>REG DATE: ${complaint.regDate}</div>
+      <div><h1 style="color:#2563eb; font-size:28px; font-weight:900; margin:0;">SUPER ASIA</h1><p style="margin:0; font-weight:900; font-size:9px;">ENTERPRISE SERVICE MANIFEST</p></div>
+      <div style="text-align:right;"><strong>COMPLAINT NO: #${complaint.complaintNo}</strong><br/>WO REF: ${complaint.workOrder}<br/>DATE: ${complaint.regDate}</div>
     </div>
-    <div class="box"><div class="label">Customer Profile</div><div class="grid"><div><div class="label">Full Name & Contact</div><div class="value">${complaint.customerName} | ${complaint.phoneNo}</div></div></div><div class="label">Primary Service Address</div><div class="value">${complaint.address}</div></div>
-    <div class="box"><div class="label">Hardware Deployment Details</div><div class="grid"><div><div class="label">Model Identity</div><div class="value">${complaint.model}</div></div><div><div class="label">Category</div><div class="value">${complaint.product}</div></div><div><div class="label">Purchase Date (DOP)</div><div class="value">${complaint.dop}</div></div><div><div class="label">Assigned Technician</div><div class="value">${complaint.techName}</div></div></div></div>
-    <div class="box"><div class="label">Field Action Log History</div><div class="remarks-box">${complaint.remarks || 'Fresh system log.'}</div></div>
-    <div class="total-row"><div><div class="label" style="color:#64748b">Final Operation Status</div><div class="value" style="color:#fff; font-size:16px;">${complaint.status}</div></div><div style="text-align:right">
-      <div class="label" style="color:#64748b">Manifest Settlement</div><div style="font-size:26px; font-weight:900; color:#10b981;">PKR ${total.toLocaleString()}/-</div>
-      <div style="font-size:9px; opacity:0.5; font-weight:bold;">(Visit: ${complaint.visitCharges}, Parts: ${complaint.partsCharges}, Other: ${complaint.otherCharges})</div>
+    <div class="box"><div class="label">Customer Profile</div><div class="grid"><div><div class="label">Full Name</div><div class="value">${complaint.customerName}</div></div><div><div class="label">Phone Number</div><div class="value">${complaint.phoneNo}</div></div></div><div class="label">Service Deployment Address</div><div class="value">${complaint.address}</div></div>
+    <div class="box"><div class="label">Asset Deployment Details</div><div class="grid"><div><div class="label">Model Identity</div><div class="value">${complaint.model}</div></div><div><div class="label">Product Category</div><div class="value">${complaint.product}</div></div><div><div class="label">Serial Sequence</div><div class="value">${complaint.serialNo || '---'}</div></div><div><div class="label">Technician</div><div class="value">${complaint.techName}</div></div></div></div>
+    <div class="box"><div class="label">Operational Activity History</div><div class="remarks">${complaint.remarks}</div></div>
+    <div class="total-row"><div><div class="label" style="color:#94a3b8">Lifecycle Status</div><div class="value" style="color:#fff; font-size:14px; margin:0;">${complaint.status}</div></div><div style="text-align:right">
+      <div class="label" style="color:#94a3b8">Final Settlement</div><div style="font-size:22px; font-weight:900; color:#10b981;">PKR ${total.toLocaleString()}/-</div>
+      <p style="font-size:8px; margin:4px 0 0 0; opacity:0.6;">(Visit: ${complaint.visitCharges} | Parts: ${complaint.partsCharges} | Misc: ${complaint.otherCharges})</p>
     </div></div>
-    <div class="policy">
-      <h4 style="margin:0 0 10px 0; text-transform:uppercase; color:#0f172a;">Enterprise Service Protocol</h4>
-      <ul style="padding-left:15px; margin:0;">
-        <li>Super Asia provides 1 Year Parts and 2 Years Motor coverage from documented D.O.P.</li>
-        <li>Protocol is void if physical damage, voltage fluctuations, or unauthorized tampering is detected.</li>
-      </ul>
-      <p style="text-align:center; font-weight:900; margin-top:40px; border-top:2px solid #f1f5f9; padding-top:15px; text-transform:uppercase; color:#2563eb;">AUTHORIZED NETWORK PARTNER - SUPER ASIA CUSTOMER CARE</p>
+    <div class="warranty">
+      <h4 style="margin:0 0 5px 0; text-transform:uppercase; color:#0f172a; font-size:9px;">Warranty Terms & Conditions</h4>
+      ${SYSTEM_RULES.WARRANTY_POINTS.map(point => `<p style="margin-bottom:2px;">${point}</p>`).join('')}
+      <p style="text-align:center; font-weight:900; margin-top:12px; color:#2563eb; font-size:8.5px;">SUPER ASIA CUSTOMER CARE - AUTHORIZED SERVICE NETWORK</p>
+    </div>
+    <div class="sig">
+      <div class="sig-line">Technician Authorization</div>
+      <div class="sig-line">Customer Acknowledgment</div>
     </div>
     <script>window.onload=()=>window.print();</script></body></html>
   `);
   printWindow.document.close();
 };
 
+const AnalyticsDashboard = ({ complaints }: { complaints: Complaint[] }) => {
+  const stats = useMemo(() => {
+    const total = complaints.length;
+    const completed = complaints.filter(c => c.status === 'COMPLETED' || c.status === 'VERIFIED').length;
+    const pending = complaints.filter(c => c.status === 'PENDING').length;
+    const revenue = complaints.reduce((sum, c) => sum + (c.visitCharges + c.partsCharges + c.otherCharges), 0);
+    return { total, completed, pending, revenue };
+  }, [complaints]);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+       <StatCard icon={Database} label="Total Managed Cases" value={stats.total} color="blue" />
+       <StatCard icon={CheckCircle2} label="Closed Lifecycles" value={stats.completed} color="emerald" />
+       <StatCard icon={Clock} label="Pending Deployment" value={stats.pending} color="amber" />
+       <StatCard icon={Landmark} label="Gross Settlement PKR" value={stats.revenue.toLocaleString()} color="indigo" />
+    </div>
+  );
+};
+
+const StatCard = ({ icon: Icon, label, value, color }: any) => {
+  const colors: any = {
+    blue: 'text-blue-600 bg-blue-50 border-blue-100',
+    emerald: 'text-emerald-600 bg-emerald-50 border-emerald-100',
+    amber: 'text-amber-600 bg-amber-50 border-amber-100',
+    indigo: 'text-indigo-600 bg-indigo-50 border-indigo-100'
+  };
+  return (
+    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
+      <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${colors[color]}`}><Icon size={20} /></div>
+      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{label}</p>
+      <h4 className="text-xl font-black text-slate-900 tracking-tighter">{value}</h4>
+    </div>
+  );
+};
+
 const Portal = ({ onLogin }: { onLogin: (user: Staff) => void }) => {
   const [id, setId] = useState("");
   const [pass, setPass] = useState("");
   const staff = SuperAsiaDB.getStaff();
+
   const handleAuth = () => {
     const u = staff.find(s => s.loginId === id);
     if (u) {
-      if (u.position !== 'TECHNICIAN' && u.password !== pass) return alert("Interface Access Revoked");
+      if (u.status === 'INACTIVE') return alert("Access Restriction protocol Active");
+      if (u.position !== 'TECHNICIAN' && u.password !== pass) return alert("Invalid PIN Sequence");
       onLogin(u);
     }
   };
+
   return (
-    <div className="min-h-screen bg-[#0F172A] flex items-center justify-center p-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-[#0F172A]">
-      <div className="max-w-md w-full bg-white p-16 rounded-[5rem] shadow-[0_40px_100px_rgba(0,0,0,0.5)] space-y-10 animate-in fade-in zoom-in-95 duration-700 border-t-8 border-blue-600">
+    <div className="min-h-screen bg-[#0F172A] flex items-center justify-center p-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 to-[#0F172A]">
+      <div className="max-w-md w-full bg-white p-12 rounded-[2.5rem] shadow-2xl space-y-10 border-t-8 border-blue-600">
         <SuperAsiaBranding size="lg" />
-        <div className="space-y-6 pt-10">
-           <div className="space-y-2">
-             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-6">Personnel Link</label>
-             <select className="w-full bg-slate-50 border-2 border-slate-100 rounded-3xl py-6 px-8 font-black uppercase outline-none focus:border-blue-600 shadow-sm transition-all" value={id} onChange={e=>setId(e.target.value)}>
-               <option value="">ESTABLISH IDENTITY...</option>
+        <div className="space-y-4 pt-6">
+           <div className="space-y-1">
+             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-4">Select User</label>
+             <select className="w-full bg-slate-50 border border-slate-200 rounded-xl py-4 px-8 font-black uppercase outline-none focus:border-blue-600 transition-all shadow-inner text-[12px]" value={id} onChange={e=>setId(e.target.value)}>
+               <option value="">WHO ARE YOU?</option>
                {staff.map(s => <option key={s.id} value={s.loginId}>{s.name} ({s.position})</option>)}
              </select>
            </div>
            {id && staff.find(s=>s.loginId===id)?.position !== 'TECHNICIAN' && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-6">Access Sequence</label>
-                <input type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAuth()} className="w-full bg-slate-50 border-2 border-slate-100 rounded-3xl py-6 px-10 font-black outline-none focus:border-blue-600 shadow-sm transition-all" placeholder="PIN SEQUENCE..." />
+              <div className="space-y-1 animate-in slide-in-from-top-4 duration-300">
+                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-4">Access PIN</label>
+                <input type="password" value={pass} onKeyDown={e => e.key === 'Enter' && handleAuth()} onChange={e=>setPass(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-4 px-10 font-black outline-none focus:border-blue-600 shadow-sm text-[12px]" placeholder="PIN CODE..." />
               </div>
            )}
         </div>
-        <button onClick={handleAuth} className="w-full bg-blue-600 text-white py-7 rounded-3xl font-black uppercase shadow-2xl shadow-blue-600/30 active:scale-95 hover:bg-blue-700 transition-all mt-6 tracking-[0.25em]">Initialize Hub</button>
+        <button onClick={handleAuth} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black uppercase shadow-2xl hover:bg-blue-700 tracking-widest transition-all active:scale-95 shadow-blue-600/30 text-[11px]">Establish Link</button>
       </div>
     </div>
   );
@@ -1035,10 +1144,8 @@ export default function SuperAsiaApp() {
   return (
     <div className="min-h-screen select-none bg-white font-sans antialiased overflow-hidden">
       {view === 'portal' && <Portal onLogin={login} />}
-      {(view === 'admin-dash' || view === 'admin-analytics' || view === 'admin-today') && currentUser && <AdminDash user={currentUser} onLogout={logout} />}
-      {view === 'technician-dash' && currentUser && (
-        <TechnicianDash user={currentUser} onLogout={logout} />
-      )}
+      {(view === 'admin-dash' || view === 'admin-analytics' || view === 'admin-today' || view === 'admin-staff') && currentUser && <AdminDash user={currentUser} onLogout={logout} />}
+      {view === 'technician-dash' && currentUser && <TechnicianDash user={currentUser} onLogout={logout} />}
     </div>
   );
 }
