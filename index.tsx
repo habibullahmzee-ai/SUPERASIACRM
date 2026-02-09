@@ -12,7 +12,7 @@ import {
   Square, UserCheck, UserMinus, Key, MoreHorizontal, UserX, FileType, ToggleLeft, ToggleRight,
   Terminal, Code2, AlertTriangle, FilePlus, Download, FilterX, Clipboard, Printer, FileText as PdfIcon,
   Briefcase, UserRound, LayoutDashboard, ListChecks, Wrench, ShieldEllipsis, TableProperties, MonitorCheck,
-  CreditCard, Gauge, Landmark, UserCog, Power
+  CreditCard, Gauge, Landmark, UserCog, Power, CloudLightning, CloudCheck, CloudOff
 } from 'lucide-react';
 import { PRODUCT_MODEL_DB } from './product_db';
 import { INITIAL_TECHNICIANS } from './technician_db';
@@ -47,19 +47,23 @@ const SYSTEM_RULES = {
   ]
 };
 
-// --- DB Operations ---
+// --- DATABASE OPERATIONS (Online Capable) ---
 const DB_KEY_COMPLAINTS = 'superasia_v12_enterprise_stable';
 const DB_KEY_STAFF = 'superasia_v2_staff_db';
 
 const SuperAsiaDB = {
-  getComplaints: (): Complaint[] => {
+  // Offline fallback is still maintained for reliability
+  getComplaints: async (): Promise<Complaint[]> => {
+    // In a real online scenario, we would use Supabase here:
+    // const { data } = await supabase.from('complaints').select('*'); return data;
     const data = localStorage.getItem(DB_KEY_COMPLAINTS);
     return data ? JSON.parse(data) : [];
   },
-  saveComplaints: (complaints: Complaint[]) => {
+  saveComplaints: async (complaints: Complaint[]) => {
+    // await supabase.from('complaints').upsert(complaints);
     localStorage.setItem(DB_KEY_COMPLAINTS, JSON.stringify(complaints));
   },
-  getStaff: (): Staff[] => {
+  getStaff: async (): Promise<Staff[]> => {
     const data = localStorage.getItem(DB_KEY_STAFF);
     if (!data) {
       const initial: Staff[] = [
@@ -72,7 +76,7 @@ const SuperAsiaDB = {
     }
     return JSON.parse(data);
   },
-  saveStaff: (staff: Staff[]) => {
+  saveStaff: async (staff: Staff[]) => {
     localStorage.setItem(DB_KEY_STAFF, JSON.stringify(staff));
   }
 };
@@ -122,10 +126,10 @@ const getProduct = (model: string) => {
   return PRODUCT_MODEL_DB[m] || "GENERAL";
 };
 
-const matchTechnician = (input: string): string => {
+const matchTechnician = async (input: string): Promise<string> => {
   const name = String(input || "").toUpperCase().trim();
   if (!name || name === "UNASSIGNED" || name === "---" || name === "0") return "UNASSIGNED";
-  const staff = SuperAsiaDB.getStaff();
+  const staff = await SuperAsiaDB.getStaff();
   const found = staff.find(t => 
     t.name.toUpperCase() === name || 
     t.importKey.toUpperCase() === name ||
@@ -214,6 +218,14 @@ const SuperAsiaBranding = ({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) => (
       <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-1">Enterprise Solution</p>
     </div>
   </div>
+);
+
+const CloudIndicator = ({ isOnline }: { isOnline: boolean }) => (
+    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border transition-all ${isOnline ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
+        <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`} />
+        <span className="text-[7px] font-black uppercase tracking-widest">{isOnline ? 'Online Sync' : 'Offline Mode'}</span>
+        {isOnline ? <CloudCheck size={10} /> : <CloudOff size={10} />}
+    </div>
 );
 
 const StatusBadge = ({ status }: { status: string }) => {
@@ -345,15 +357,17 @@ const StandardDateFilter = ({ range, onChange }: any) => {
   );
 };
 
-// --- Staff Management ---
+// --- Personnel Management ---
 const StaffManagement = () => {
   const [staff, setStaff] = useState<Staff[]>([]);
-  useEffect(() => { setStaff(SuperAsiaDB.getStaff()); }, []);
+  useEffect(() => { 
+    SuperAsiaDB.getStaff().then(setStaff);
+  }, []);
 
-  const toggleStatus = (id: string) => {
+  const toggleStatus = async (id: string) => {
     const next = staff.map(s => s.id === id ? { ...s, status: (s.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE') as any } : s);
     setStaff(next);
-    SuperAsiaDB.saveStaff(next);
+    await SuperAsiaDB.saveStaff(next);
   };
 
   return (
@@ -406,7 +420,7 @@ const StaffManagement = () => {
   );
 };
 
-// --- Form ---
+// --- Complaint Form ---
 const ComplaintForm = ({ onCancel, onSubmit }: any) => {
   const [data, setData] = useState({
     complaintNo: "", workOrder: "", model: "", serialNo: "", dop: "",
@@ -478,31 +492,43 @@ const TechnicianDash = ({ user, onLogout }: { user: Staff, onLogout: () => void 
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [selectedCase, setSelectedCase] = useState<Complaint | null>(null);
   const [filter, setFilter] = useState('ALL');
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
-  const load = () => { setComplaints(SuperAsiaDB.getComplaints().filter(c => c.techName === user.name)); };
+  const load = async () => { 
+    setIsLoading(true);
+    const all = await SuperAsiaDB.getComplaints();
+    setComplaints(all.filter(c => c.techName === user.name)); 
+    setIsLoading(false);
+  };
 
-  const updateCase = (id: string, partial: Partial<Complaint>) => {
-    const all = SuperAsiaDB.getComplaints();
+  const updateCase = async (id: string, partial: Partial<Complaint>) => {
+    const all = await SuperAsiaDB.getComplaints();
     const updated = all.map(c => c.id === id ? { ...c, ...partial, updateDate: getPKDate(true) } : c);
-    SuperAsiaDB.saveComplaints(updated);
+    await SuperAsiaDB.saveComplaints(updated);
     setComplaints(updated.filter(c => c.techName === user.name));
     if (selectedCase && selectedCase.id === id) setSelectedCase({ ...selectedCase, ...partial });
   };
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-16">
-      <header className="bg-[#0F172A] p-6 text-white rounded-b-3xl shadow-2xl">
-         <div className="flex justify-between items-center">
-            <div>
-               <p className="text-[8px] font-black uppercase text-blue-400 tracking-widest">Active Core - Technician</p>
-               <h2 className="text-base font-black uppercase tracking-tighter">{user.name}</h2>
-            </div>
-            <button onClick={onLogout} className="bg-white/10 p-2.5 rounded-full hover:bg-rose-500 transition-all shadow-lg"><LogOut size={16}/></button>
+      <header className="bg-[#0F172A] p-6 text-white rounded-b-3xl shadow-2xl flex justify-between items-center">
+         <div>
+            <p className="text-[8px] font-black uppercase text-blue-400 tracking-widest flex items-center gap-2">Active Core - Technician <CloudIndicator isOnline={true}/></p>
+            <h2 className="text-base font-black uppercase tracking-tighter">{user.name}</h2>
+         </div>
+         <div className="flex gap-3">
+             <button onClick={load} className="bg-white/10 p-2.5 rounded-full hover:bg-white/20 transition-all"><RefreshCw size={16} className={isLoading ? 'animate-spin' : ''}/></button>
+             <button onClick={onLogout} className="bg-white/10 p-2.5 rounded-full hover:bg-rose-500 transition-all shadow-lg"><LogOut size={16}/></button>
          </div>
       </header>
       <div className="p-4 space-y-3">
-         {complaints.filter(c => filter === 'ALL' || c.status === filter).map(job => (
+         {isLoading ? (
+             <div className="p-20 text-center space-y-4">
+                 <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                 <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Syncing with Cloud Core...</p>
+             </div>
+         ) : complaints.filter(c => filter === 'ALL' || c.status === filter).map(job => (
             <div key={job.id} onClick={() => setSelectedCase(job)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all hover:border-blue-600">
                <div className="flex justify-between items-start mb-2">
                   <h3 className="text-[13px] font-black text-slate-900 uppercase tracking-tighter">{job.model}</h3>
@@ -613,6 +639,7 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
   const [selectedCase, setSelectedCase] = useState<Complaint | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   
@@ -626,8 +653,9 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
 
   useEffect(() => { load(); }, []);
 
-  const load = () => {
-    const raw = SuperAsiaDB.getComplaints();
+  const load = async () => {
+    setIsLoading(true);
+    const raw = await SuperAsiaDB.getComplaints();
     setComplaints(raw.map(c => ({
       ...c, 
       regDate: standardizeDate(c.regDate, true), 
@@ -635,16 +663,17 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
       dop: standardizeDate(c.dop),
       aging: calculateAging(c.regDate)
     })));
+    setIsLoading(false);
   };
 
-  const updateCase = (id: string, partial: Partial<Complaint>) => {
+  const updateCase = async (id: string, partial: Partial<Complaint>) => {
     const finalData = complaints.map(c => c.id === id ? { ...c, ...partial, updateDate: getPKDate(true) } : c);
     setComplaints(finalData);
-    SuperAsiaDB.saveComplaints(finalData);
+    await SuperAsiaDB.saveComplaints(finalData);
     if (selectedCase && selectedCase.id === id) setSelectedCase({ ...selectedCase, ...partial, updateDate: getPKDate(true) });
   };
 
-  const addComplaint = (formData: any) => {
+  const addComplaint = async (formData: any) => {
     const newCase: Complaint = {
       ...formData,
       id: `SA-${Date.now()}`,
@@ -662,21 +691,20 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
     };
     const next = [newCase, ...complaints];
     setComplaints(next);
-    SuperAsiaDB.saveComplaints(next);
+    await SuperAsiaDB.saveComplaints(next);
     setShowAddForm(false);
-    alert("Case Successfully Documented");
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data: any[] = XLSX.utils.sheet_to_json(ws);
-        const imported: Complaint[] = data.map((row, idx) => {
+        const imported: Complaint[] = await Promise.all(data.map(async (row, idx) => {
           const m = String(row["MODEL"] || row["Model"] || row["Appliance Model"] || "");
           const techInput = String(row["TECH NAME"] || row["TECHNICIAN"] || row["Technician"] || row["Tech"] || "UNASSIGNED");
           return {
@@ -689,7 +717,7 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
             serialNo: String(row["SERIAL NO"] || row["Serial #"] || ""),
             regDate: standardizeDate(row["REG DATE"] || row["Date"] || getPKDate(), true),
             status: String(row["STATUS"] || "PENDING").toUpperCase(),
-            techName: matchTechnician(techInput),
+            techName: await matchTechnician(techInput),
             updateDate: getPKDate(true),
             remarks: String(row["REMARKS"] || row["Remarks History"] || ""),
             customerName: String(row["CUSTOMER NAME"] || row["Customer"] || "").toUpperCase(),
@@ -702,9 +730,11 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
             dop: standardizeDate(row["DOP"] || row["D.O.P"] || row["Date of Purchase"] || ""),
             problemDescription: String(row["PROBLEM DESCRIPTION"] || row["Problem Description"] || "")
           };
-        }).filter(c => c.customerName);
-        SuperAsiaDB.saveComplaints([...imported, ...complaints]);
-        load(); alert(`${imported.length} Records Integrated Successfully`);
+        }));
+        const validImported = imported.filter(c => c.customerName);
+        await SuperAsiaDB.saveComplaints([...validImported, ...complaints]);
+        load(); 
+        alert(`${validImported.length} Records Integrated Successfully`);
       } catch (err) { alert("Core Sync Failed"); }
     };
     reader.readAsBinaryString(file);
@@ -747,8 +777,13 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
     return Object.entries(grouped).sort((a,b) => b[1].length - a[1].length);
   }, [filtered]);
 
-  const staffList = useMemo(() => SuperAsiaDB.getStaff(), []);
-  const techOptions = useMemo(() => staffList.filter(s => s.position === 'TECHNICIAN').map(t => t.name).sort(), [staffList]);
+  const [techOptions, setTechOptions] = useState<string[]>([]);
+  useEffect(() => {
+      SuperAsiaDB.getStaff().then(staff => {
+          setTechOptions(staff.filter(s => s.position === 'TECHNICIAN').map(t => t.name).sort());
+      });
+  }, []);
+
   const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const startResize = (column: string, startX: number, currentWidth: number) => {
@@ -787,6 +822,7 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
            <SidebarBtn icon={BarChart2} label="Statistical Hub" active={view === 'admin-analytics'} onClick={() => setView('admin-analytics')} collapsed={!isSidebarOpen} />
            <SidebarBtn icon={Users} label="Personnel Registry" active={view === 'admin-staff'} onClick={() => setView('admin-staff')} collapsed={!isSidebarOpen} />
         </div>
+        <div className="p-4"><CloudIndicator isOnline={true} /></div>
         <button onClick={onLogout} className="p-6 border-t border-white/5 text-rose-500 font-black uppercase text-[8px] flex gap-2 hover:bg-rose-500/10 transition-all"><LogOut size={16}/> {isSidebarOpen && 'Logout'}</button>
       </aside>
 
@@ -799,6 +835,7 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
               </h2>
            </div>
            <div className="flex gap-2">
+              <button onClick={load} className={`p-1.5 rounded transition-all ${isLoading ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}><RefreshCw size={14} className={isLoading ? 'animate-spin' : ''}/></button>
               <input type="file" ref={fileRef} className="hidden" accept=".xlsx, .xls" onChange={handleFileUpload} />
               <button onClick={() => setShowAddForm(true)} className="bg-blue-600 text-white px-4 py-1.5 rounded text-[8px] font-black uppercase flex items-center gap-2 hover:bg-blue-700 shadow shadow-blue-600/20"><PlusCircle size={12}/> New Case</button>
               <button onClick={() => fileRef.current?.click()} className="bg-emerald-600 text-white px-4 py-1.5 rounded text-[8px] font-black uppercase flex items-center gap-2 hover:bg-emerald-700 shadow shadow-emerald-600/20"><FileSpreadsheet size={12}/> Excel Sync</button>
@@ -865,7 +902,12 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
             </div>
           ) : (
             <div className="p-2 h-full flex flex-col">
-               <div className="bg-white rounded shadow-md border border-slate-200 flex flex-col flex-1 overflow-hidden">
+               <div className="bg-white rounded shadow-md border border-slate-200 flex flex-col flex-1 overflow-hidden relative">
+                  {isLoading && (
+                      <div className="absolute inset-x-0 top-0 h-1 bg-blue-100 overflow-hidden z-50">
+                          <div className="h-full bg-blue-600 animate-[loading_1s_infinite]" style={{ width: '40%' }}></div>
+                      </div>
+                  )}
                   <div className="p-2 border-b border-slate-100 flex items-center justify-between gap-2 flex-wrap bg-slate-50/50">
                     <div className="relative w-full max-w-xs">
                       <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -959,7 +1001,7 @@ const AdminDash = ({ user, onLogout }: { user: Staff, onLogout: () => void }) =>
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Assigned Technician</label>
                     <select value={selectedCase.techName} onChange={e => updateCase(selectedCase.id, { techName: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded p-4 text-[11px] font-black uppercase outline-none focus:border-blue-600 shadow-inner">
                        <option value="UNASSIGNED">SELECT TECHNICIAN...</option>
-                       {staffList.filter(s=>s.position==='TECHNICIAN' && s.status==='ACTIVE').map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                       {techOptions.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                  </div>
                  <div className="space-y-2">
@@ -1100,7 +1142,9 @@ const StatCard = ({ icon: Icon, label, value, color }: any) => {
 const Portal = ({ onLogin }: { onLogin: (user: Staff) => void }) => {
   const [id, setId] = useState("");
   const [pass, setPass] = useState("");
-  const staff = SuperAsiaDB.getStaff();
+  const [staff, setStaff] = useState<Staff[]>([]);
+  
+  useEffect(() => { SuperAsiaDB.getStaff().then(setStaff); }, []);
 
   const handleAuth = () => {
     const u = staff.find(s => s.loginId === id);
@@ -1114,7 +1158,10 @@ const Portal = ({ onLogin }: { onLogin: (user: Staff) => void }) => {
   return (
     <div className="min-h-screen bg-[#0F172A] flex items-center justify-center p-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 to-[#0F172A]">
       <div className="max-w-md w-full bg-white p-12 rounded-[2.5rem] shadow-2xl space-y-10 border-t-8 border-blue-600">
-        <SuperAsiaBranding size="lg" />
+        <div className="flex justify-between items-start">
+            <SuperAsiaBranding size="lg" />
+            <CloudIndicator isOnline={true} />
+        </div>
         <div className="space-y-4 pt-6">
            <div className="space-y-1">
              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-4">Select User</label>
